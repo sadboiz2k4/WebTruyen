@@ -1,0 +1,52 @@
+server:
+  port: 8080
+  servlet:
+    session:
+      timeout: 7d
+      cookie:
+        http-only: true
+        same-site: lax
+
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  application:
+    name: toptruyen-backend
+  servlet:
+    multipart:
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:10MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:20MB}
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/toptruyen_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&useUnicode=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.MySQL8Dialect
+    hibernate:
+      ddl-auto: none
+
+vnpay:
+  tmn-code: ${VNPAY_TMN_CODE:WVY84N4N}
+  hash-secret: ${VNPAY_HASH_SECRET:JWXZ4ES7J1AY10YOGUB49A2HPEDORSNX}
+  url: ${VNPAY_URL:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+  return-url: ${VNPAY_RETURN_URL:http://localhost:8080/api/wallet/vnpay/return}
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+
+momo:
+  partner-code: ${MOMO_PARTNER_CODE:MOMO}
+  access-key: ${MOMO_ACCESS_KEY:F8BBA842ECF85}
+  secret-key: ${MOMO_SECRET_KEY:K951B6PE1waDMi640xX08PD3vg6EkVlz}
+  endpoint: ${MOMO_ENDPOINT:https://test-payment.momo.vn/v2/gateway/api/create}
+  redirect-url: ${MOMO_REDIRECT_URL:http://localhost:8080/api/wallet/momo/return}
+  ipn-url: ${MOMO_IPN_URL:http://localhost:8080/api/wallet/momo/ipn}
+
+app:
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:}
+  imagekit:
+    url-endpoint: ${IMAGEKIT_URL_ENDPOINT:https://ik.imagekit.io/toptruyen}
+    public-key: ${IMAGEKIT_PUBLIC_KEY:}
+    private-key: ${IMAGEKIT_PRIVATE_KEY:}
+    folder: ${IMAGEKIT_FOLDER:/toptruyen/uploads/images}
+    max-file-size-bytes: ${IMAGEKIT_MAX_FILE_SIZE_BYTES:10485760}
