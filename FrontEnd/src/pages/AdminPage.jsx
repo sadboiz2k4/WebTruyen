@@ -12,6 +12,7 @@ const TABS = [
   { key: 'users', icon: faUsers, label: 'Người dùng' },
   { key: 'comics', icon: faBookOpen, label: 'Truyện' },
   { key: 'chapters', icon: faBook, label: 'Chapter' },
+  { key: 'moderation', icon: faHourglass, label: 'Kiểm duyệt' },
   { key: 'comments', icon: faCommentDots, label: 'Bình luận' },
   { key: 'reports', icon: faFlag, label: 'Báo cáo' },
   { key: 'appeals', icon: faShield, label: 'Kháng nghị' },
@@ -44,6 +45,12 @@ import {
   setComicFeaturedApi,
   setComicStatusApi,
   setUserStatusApi,
+  setAdminRoleApi,
+  getPendingChaptersAdminApi,
+  approveChapterApi,
+  rejectChapterApi,
+  recheckChapterApi,
+  getChapterContentAdminApi,
 } from '../services/adminApi';
 import { faStar as faStarRegular, faStar } from '@fortawesome/free-solid-svg-icons';
 import { faStar as faStarOutline } from '@fortawesome/free-regular-svg-icons';
@@ -285,6 +292,19 @@ function UsersTab() {
     } catch (e) { setActionMsg(e.message); }
   };
 
+  const toggleAdminRole = async (userId, currentIsAdmin) => {
+    const grant = !currentIsAdmin;
+    const confirmMsg = grant
+      ? 'Bạn có chắc muốn cấp quyền Admin cho người dùng này?'
+      : 'Bạn có chắc muốn thu hồi quyền Admin của người dùng này?';
+    if (!window.confirm(confirmMsg)) return;
+    try {
+      await setAdminRoleApi(userId, grant);
+      setActionMsg(grant ? 'Đã cấp quyền Admin thành công' : 'Đã thu hồi quyền Admin');
+      load(page);
+    } catch (e) { setActionMsg(e.message); }
+  };
+
   return (
     <div className="admin-tab-content">
       {actionMsg && <p className="admin-action-msg">{actionMsg}</p>}
@@ -295,7 +315,7 @@ function UsersTab() {
               <thead>
                 <tr>
                   <th>ID</th><th>Email</th><th>Tên</th><th>Truyện</th>
-                  <th>Số dư xu</th><th>Ngày tạo</th><th>Trạng thái</th><th>Hành động</th>
+                  <th>Số dư xu</th><th>Ngày tạo</th><th>Trạng thái</th><th>Quyền</th><th>Hành động</th>
                 </tr>
               </thead>
               <tbody>
@@ -313,12 +333,24 @@ function UsersTab() {
                       </span>
                     </td>
                     <td>
+                      {u.isAdmin
+                        ? <span className="admin-badge admin-badge--purple">Admin</span>
+                        : <span className="admin-badge admin-badge--gray">User</span>}
+                    </td>
+                    <td style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         className={`admin-btn admin-btn--sm ${u.status === 'ACTIVE' ? 'admin-btn--danger' : 'admin-btn--success'}`}
                         onClick={() => toggleStatus(u.id, u.status)}
                       >
                         {u.status === 'ACTIVE' ? 'Cấm' : 'Bỏ cấm'}
+                      </button>
+                      <button
+                        type="button"
+                        className={`admin-btn admin-btn--sm ${u.isAdmin ? 'admin-btn--warning' : 'admin-btn--primary'}`}
+                        onClick={() => toggleAdminRole(u.id, u.isAdmin)}
+                      >
+                        {u.isAdmin ? 'Thu Admin' : 'Cấp Admin'}
                       </button>
                     </td>
                   </tr>
@@ -569,6 +601,197 @@ function ChaptersTab() {
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+function ModerationTab() {
+  const [chapters, setChapters] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [actionMsg, setActionMsg] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [rechecking, setRechecking] = useState(false);
+
+  useEffect(() => {
+    getPendingChaptersAdminApi()
+      .then((data) => setChapters(Array.isArray(data) ? data : []))
+      .catch((e) => setActionMsg(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleApprove = async (chapterId) => {
+    try {
+      await approveChapterApi(chapterId);
+      setChapters((prev) => prev.filter((c) => c.id !== chapterId));
+      setPreview(null);
+      setActionMsg('✅ Đã duyệt và xuất bản chương.');
+    } catch (e) { setActionMsg(e.message); }
+  };
+
+  const handleReject = async (chapterId) => {
+    const reason = window.prompt('Lý do từ chối (sẽ gửi thông báo cho tác giả):');
+    if (reason === null) return;
+    try {
+      await rejectChapterApi(chapterId, reason || 'Vi phạm nội dung');
+      setChapters((prev) => prev.filter((c) => c.id !== chapterId));
+      setPreview(null);
+      setActionMsg('❌ Đã từ chối và xóa chương.');
+    } catch (e) { setActionMsg(e.message); }
+  };
+
+  const handlePreview = async (chapterId) => {
+    try {
+      const data = await getChapterContentAdminApi(chapterId);
+      setPreview(data);
+    } catch (e) { setActionMsg(e.message); }
+  };
+
+  const handleRecheck = async (chapterId) => {
+    setRechecking(true);
+    setActionMsg('⏳ AI đang kiểm tra lại nội dung...');
+    try {
+      const result = await recheckChapterApi(chapterId);
+      if (result.status === 'PUBLISHED') {
+        setChapters((prev) => prev.filter((c) => c.id !== chapterId));
+        setPreview(null);
+        setActionMsg('✅ AI đã duyệt — chapter được xuất bản.');
+      } else if (result.status === 'AI_UNAVAILABLE') {
+        setActionMsg('⚠️ AI chưa sẵn sàng, thử lại sau ít phút.');
+      } else if (result.status === 'REJECTED') {
+        setChapters((prev) => prev.filter((c) => c.id !== chapterId));
+        setPreview(null);
+        setActionMsg('❌ AI xác nhận vi phạm — chapter bị từ chối.');
+      } else {
+        setActionMsg('⏳ AI vẫn chưa chắc chắn — chapter tiếp tục chờ duyệt. Lý do: ' + (result.reason || ''));
+        const fresh = await getChapterContentAdminApi(chapterId);
+        setPreview(fresh);
+      }
+    } catch (e) { setActionMsg(e.message); }
+    finally { setRechecking(false); }
+  };
+
+  return (
+    <div className="admin-tab-content">
+      <h3 style={{ marginBottom: 12 }}>Chương chờ xét duyệt ({chapters.length})</h3>
+      {actionMsg && <p className="admin-action-msg">{actionMsg}</p>}
+
+      {/* Modal xem nội dung — so sánh 2 cột */}
+      {preview && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '96%', maxWidth: 1200, maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
+            <button onClick={() => setPreview(null)} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, cursor: 'pointer' }}>✕</button>
+
+            <h3 style={{ margin: '0 0 4px' }}>{preview.comic_title} — Chương {preview.chapter_no}: {preview.title}</h3>
+            <p style={{ margin: '0 0 2px', fontSize: 13, color: '#b45309', fontWeight: 600 }}>
+              ⚠️ {preview.moderation_reason || 'AI nghi ngờ nội dung'}
+            </p>
+            <p style={{ margin: '0 0 16px', fontSize: 12, color: '#6b7280' }}>Tác giả: {preview.author_name}</p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: preview.matchedChapter ? '1fr 1fr' : '1fr', gap: 16 }}>
+              {/* Cột trái: bản bị nghi ngờ */}
+              <div>
+                <div style={{ background: '#fef9c3', border: '1px solid #fde047', borderRadius: 8, padding: '8px 14px', marginBottom: 8, fontWeight: 700, fontSize: 13 }}>
+                  📄 Bản đang xét duyệt
+                </div>
+                {preview.pages && preview.pages.length > 0 ? (
+                  <div style={{ maxHeight: 480, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafaf8' }}>
+                    {preview.pages.map((url, i) => (
+                      <img key={i} src={url} alt={`Trang ${i + 1}`} style={{ width: '100%', display: 'block', borderBottom: '2px solid #fde047' }} loading="lazy" />
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ background: '#fafaf8', borderRadius: 8, padding: '14px 18px', fontSize: 14, lineHeight: 1.9, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 480, overflowY: 'auto', border: '1px solid #e5e7eb' }}>
+                    {preview.content || '(Không có nội dung)'}
+                  </div>
+                )}
+              </div>
+
+              {/* Cột phải: bản gốc bị trùng */}
+              {preview.matchedChapter && (
+                <div>
+                  <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 14px', marginBottom: 8, fontWeight: 700, fontSize: 13, color: '#dc2626' }}>
+                    🔍 Truyện gốc bị trùng: {preview.matchedChapter.comic_title} — Chương {preview.matchedChapter.chapter_no}: {preview.matchedChapter.title}
+                  </div>
+                  {preview.matchedChapter.pages && preview.matchedChapter.pages.length > 0 ? (
+                    <div style={{ maxHeight: 480, overflowY: 'auto', border: '1px solid #fca5a5', borderRadius: 8, background: '#fff5f5' }}>
+                      {preview.matchedChapter.pages.map((url, i) => (
+                        <img key={i} src={url} alt={`Trang ${i + 1}`} style={{ width: '100%', display: 'block', borderBottom: '2px solid #fca5a5' }} loading="lazy" />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ background: '#fff5f5', borderRadius: 8, padding: '14px 18px', fontSize: 14, lineHeight: 1.9, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 480, overflowY: 'auto', border: '1px solid #fca5a5' }}>
+                      {preview.matchedChapter.content || '(Không có nội dung)'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {actionMsg && (
+              <div style={{ margin: '12px 0 0', padding: '10px 14px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 13, color: '#0369a1' }}>
+                {actionMsg}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
+              <button className="admin-btn" style={{ background: '#6366f1', color: '#fff', borderColor: '#6366f1', opacity: rechecking ? 0.7 : 1 }}
+                onClick={() => handleRecheck(preview.id)} disabled={rechecking}>
+                {rechecking ? '⏳ AI đang kiểm tra...' : '🤖 Kiểm tra lại AI'}
+              </button>
+              <button className="admin-btn" style={{ background: '#16a34a', color: '#fff', borderColor: '#16a34a' }}
+                onClick={() => handleApprove(preview.id)}>
+                <FontAwesomeIcon icon={faCircleCheck} /> Duyệt xuất bản
+              </button>
+              <button className="admin-btn admin-btn--danger"
+                onClick={() => handleReject(preview.id)}>
+                <FontAwesomeIcon icon={faCircleXmark} /> Từ chối
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading ? <div className="empty-preview">Đang tải...</div> : chapters.length === 0 ? (
+        <div className="empty-preview" style={{ color: '#16a34a' }}>✅ Không có chương nào cần xét duyệt.</div>
+      ) : (
+        <div className="admin-table-wrap">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Truyện</th><th>Chap</th><th>Tiêu đề</th>
+                <th>Tác giả</th><th>Lý do AI nghi ngờ</th><th>Ngày đăng</th><th>Hành động</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chapters.map((ch) => (
+                <tr key={ch.id}>
+                  <td>{ch.id}</td>
+                  <td>{ch.comic_title}</td>
+                  <td>{ch.chapter_no}</td>
+                  <td>
+                    <button className="admin-btn admin-btn--sm" style={{ background: '#392f68', color: '#fff', borderColor: '#392f68' }}
+                      onClick={() => handlePreview(ch.id)}>
+                      👁 Xem nội dung
+                    </button>
+                  </td>
+                  <td>{ch.author_name}</td>
+                  <td style={{ fontSize: 12, color: '#b45309', maxWidth: 220 }}>{ch.moderation_reason || '—'}</td>
+                  <td>{ch.published_at?.slice(0, 16)}</td>
+                  <td style={{ display: 'flex', gap: 6 }}>
+                    <button className="admin-btn admin-btn--sm" style={{ background: '#16a34a', color: '#fff', borderColor: '#16a34a' }}
+                      onClick={() => handleApprove(ch.id)}>
+                      <FontAwesomeIcon icon={faCircleCheck} /> Duyệt
+                    </button>
+                    <button className="admin-btn admin-btn--sm admin-btn--danger"
+                      onClick={() => handleReject(ch.id)}>
+                      <FontAwesomeIcon icon={faCircleXmark} /> Từ chối
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -1147,15 +1370,15 @@ function WithdrawalsTab() {
 
   useEffect(() => { load(0); }, []);
 
-  const handleProcess = async (requestId, newStatus) => {
-    const adminNote = newStatus === 'REJECTED'
-      ? (await outlet.openAdminNote('')) || ''
-      : '';
+  const [rejectNote, setRejectNote] = useState({});
+
+  const handleProcess = async (requestId, newStatus, note = '') => {
     try {
-      await processWithdrawalApi(requestId, newStatus, adminNote);
-      setActionMsg(newStatus === 'APPROVED' ? 'Đã duyệt và trừ xu thành công' : 'Đã từ chối yêu cầu');
+      await processWithdrawalApi(requestId, newStatus, note);
+      setActionMsg(newStatus === 'APPROVED' ? 'Đã duyệt thành công' : 'Đã từ chối, tiền đã hoàn lại cho tác giả');
+      setRejectNote(prev => { const n = { ...prev }; delete n[requestId]; return n; });
       load(page, filterStatus);
-    } catch (e) { setActionMsg(e.message); }
+    } catch (e) { setActionMsg(e.message || 'Có lỗi xảy ra'); }
   };
 
   const STATUS_LABELS = {
@@ -1204,12 +1427,21 @@ function WithdrawalsTab() {
                     </td>
                     <td className="admin-actions-cell">
                       {r.status === 'PENDING' && (
-                        <>
-                          <button type="button" className="admin-btn admin-btn--sm admin-btn--success"
-                            onClick={() => handleProcess(r.id, 'APPROVED')}>Duyệt</button>
-                          <button type="button" className="admin-btn admin-btn--sm admin-btn--danger"
-                            onClick={() => handleProcess(r.id, 'REJECTED')}>Từ chối</button>
-                        </>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 200 }}>
+                          <input
+                            type="text"
+                            placeholder="Ghi chú (tuỳ chọn)..."
+                            value={rejectNote[r.id] || ''}
+                            onChange={e => setRejectNote(prev => ({ ...prev, [r.id]: e.target.value }))}
+                            style={{ fontSize: 12, padding: '3px 7px', border: '1px solid #ddd', borderRadius: 4, width: '100%' }}
+                          />
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button type="button" className="admin-btn admin-btn--sm admin-btn--success"
+                              onClick={() => handleProcess(r.id, 'APPROVED', rejectNote[r.id] || '')}>Duyệt</button>
+                            <button type="button" className="admin-btn admin-btn--sm admin-btn--danger"
+                              onClick={() => handleProcess(r.id, 'REJECTED', rejectNote[r.id] || '')}>Từ chối</button>
+                          </div>
+                        </div>
                       )}
                       {r.status !== 'PENDING' && (
                         <span className="admin-processed-note">{r.admin_note || '—'}</span>
@@ -1234,7 +1466,7 @@ function WithdrawalsTab() {
 }
 
 // export tab components so router can reference them
-export { DashboardTab, UsersTab, ComicsTab, ChaptersTab, CommentsTab, ReportsTab, AppealsTab, TransactionsTab, WithdrawalsTab };
+export { DashboardTab, UsersTab, ComicsTab, ChaptersTab, ModerationTab, CommentsTab, ReportsTab, AppealsTab, TransactionsTab, WithdrawalsTab };
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -1244,6 +1476,7 @@ export default function AdminPage() {
   const [notePromiseResolve, setNotePromiseResolve] = useState(() => null);
   const [authChecked, setAuthChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     meApi()
@@ -1255,6 +1488,16 @@ export default function AdminPage() {
       })
       .catch(() => { navigate('/login'); });
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const load = () => getPendingChaptersAdminApi()
+      .then((data) => setPendingCount(Array.isArray(data) ? data.length : 0))
+      .catch(() => {});
+    load();
+    const interval = setInterval(load, 60000); // refresh mỗi 1 phút
+    return () => clearInterval(interval);
+  }, [isAdmin]);
 
   const openAdminNote = (initial = '') => {
     return new Promise((resolve) => {
@@ -1322,6 +1565,15 @@ export default function AdminPage() {
                   className={({ isActive }) => `admin-nav-btn ${isActive ? 'active' : ''}`}
                 >
                   <FontAwesomeIcon icon={t.icon} /> {t.label}
+                  {t.key === 'moderation' && pendingCount > 0 && (
+                    <span style={{
+                      marginLeft: 6, background: '#dc2626', color: '#fff',
+                      borderRadius: 10, padding: '1px 7px', fontSize: 11,
+                      fontWeight: 700, lineHeight: 1.6
+                    }}>
+                      {pendingCount}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </nav>

@@ -862,8 +862,6 @@ export default function ComicReaderPage() {
                     </button>
                   </div>
 
-                  <p className="text-reader-meta">Phiên bản dịch {wordCount} chữ</p>
-
                   <article
                     className={`text-reader-content text-reader-content--${readBg} text-reader-font--${readFont} text-reader-size--${readFontSize}`}
                   >

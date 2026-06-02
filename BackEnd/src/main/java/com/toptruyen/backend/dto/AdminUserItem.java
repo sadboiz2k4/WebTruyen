@@ -7,6 +7,7 @@ public record AdminUserItem(
         String status,
         String createdAt,
         long walletBalance,
-        int comicCount
+        int comicCount,
+        boolean isAdmin
 ) {
 }

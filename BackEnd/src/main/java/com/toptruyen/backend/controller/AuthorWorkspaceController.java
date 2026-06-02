@@ -271,6 +271,13 @@ public class AuthorWorkspaceController {
         }
     }
 
+    @GetMapping("/chapters/pending")
+    public ResponseEntity<?> getPendingChapters(HttpSession session) {
+        Object userId = session.getAttribute(SESSION_USER_ID);
+        if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Chua dang nhap"));
+        return ResponseEntity.ok(authorWorkspaceService.getPendingChapters(((Number) userId).longValue()));
+    }
+
     @DeleteMapping("/chapters/{chapterId}")
     public ResponseEntity<?> deleteChapter(@PathVariable Long chapterId, HttpSession session) {
         Object userId = session.getAttribute(SESSION_USER_ID);

@@ -114,3 +114,21 @@ export async function getWithdrawalRequestsApi(page = 0, limit = 20) {
   });
   return parseResponse(response);
 }
+
+export async function getSavedBankAccountsApi() {
+  return parseResponse(await fetch(`${API_BASE}/api/wallet/bank-accounts`, { credentials: 'include' }));
+}
+
+export async function saveBankAccountApi(bankInfo) {
+  return parseResponse(await fetch(`${API_BASE}/api/wallet/bank-accounts`, {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bankInfo }),
+  }));
+}
+
+export async function deleteBankAccountApi(id) {
+  return parseResponse(await fetch(`${API_BASE}/api/wallet/bank-accounts/${id}`, {
+    method: 'DELETE', credentials: 'include',
+  }));
+}

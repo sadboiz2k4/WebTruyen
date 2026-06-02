@@ -5452,6 +5452,8 @@ a {
 
 .admin-btn--ghost { background: var(--bg); border-color: var(--line); color: var(--text-sub); }
 .admin-btn--featured { background: #fef9c3; border-color: #fde047; color: #713f12; }
+.admin-btn--primary { background: #cce5ff; border-color: #b8daff; color: #004085; }
+.admin-badge--purple { background: #e8d5f5; color: #5b21b6; border: 1px solid #d8b4fe; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
 .admin-processed-note { font-size: 12px; color: var(--text-sub); font-style: italic; }
 
 /* Revenue subtabs */

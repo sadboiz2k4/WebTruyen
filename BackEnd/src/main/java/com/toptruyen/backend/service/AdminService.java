@@ -69,7 +69,9 @@ public class AdminService {
                 SELECT u.id, u.email, u.display_name, u.status,
                        DATE_FORMAT(u.created_at, '%Y-%m-%d') AS created_at,
                        COALESCE(w.balance, 0) AS wallet_balance,
-                       (SELECT COUNT(1) FROM published_comics pc WHERE pc.user_id = u.id) AS comic_count
+                       (SELECT COUNT(1) FROM published_comics pc WHERE pc.user_id = u.id) AS comic_count,
+                       EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                              WHERE ur.user_id = u.id AND r.code IN ('ROLE_ADMIN', 'ADMIN')) AS is_admin
                 FROM users u
                 LEFT JOIN user_wallets w ON w.user_id = u.id
                 ORDER BY u.created_at DESC
@@ -82,7 +84,8 @@ public class AdminService {
                         rs.getString("status"),
                         rs.getString("created_at"),
                         rs.getLong("wallet_balance"),
-                        rs.getInt("comic_count")
+                        rs.getInt("comic_count"),
+                        rs.getBoolean("is_admin")
                 ),
                 size, offset
         );
@@ -98,6 +101,36 @@ public class AdminService {
             throw new IllegalArgumentException("Trạng thái không hợp lệ");
         }
         jdbcTemplate.update("UPDATE users SET status = ? WHERE id = ?", status, userId);
+    }
+
+    public void setAdminRole(Long userId, boolean grant) {
+        Integer userExists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM users WHERE id = ?", Integer.class, userId);
+        if (userExists == null || userExists == 0) {
+            throw new IllegalArgumentException("Người dùng không tồn tại");
+        }
+
+        // Tạo role nếu chưa có
+        List<Long> roleIds = jdbcTemplate.queryForList(
+                "SELECT id FROM roles WHERE code IN ('ROLE_ADMIN', 'ADMIN') LIMIT 1", Long.class);
+        Long roleId;
+        if (roleIds.isEmpty()) {
+            jdbcTemplate.update(
+                    "INSERT INTO roles(code, name) VALUES ('ROLE_ADMIN', 'Quản trị viên')");
+            roleId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        } else {
+            roleId = roleIds.get(0);
+        }
+
+        if (grant) {
+            Integer already = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(1) FROM user_roles WHERE user_id = ? AND role_id = ?",
+                    Integer.class, userId, roleId);
+            if (already != null && already > 0) return;
+            jdbcTemplate.update("INSERT INTO user_roles(user_id, role_id) VALUES (?, ?)", userId, roleId);
+        } else {
+            jdbcTemplate.update("DELETE FROM user_roles WHERE user_id = ? AND role_id = ?", userId, roleId);
+        }
     }
 
     public List<AdminComicItem> getComics(int page, int size, String status) {
@@ -728,6 +761,244 @@ public class AdminService {
         jdbcTemplate.update("DELETE FROM published_chapters WHERE id = ?", chapterId);
     }
 
+    public java.util.Map<String, Object> getChapterContent(Long chapterId) {
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>(
+            jdbcTemplate.queryForMap("""
+                SELECT pc.id, pc.chapter_no, pc.title, pc.content, pc.status,
+                       pc.moderation_reason, pc.matched_chapter_id,
+                       pco.title AS comic_title, pco.slug AS comic_slug,
+                       u.display_name AS author_name
+                FROM published_chapters pc
+                JOIN published_comics pco ON pc.comic_id = pco.id
+                JOIN users u ON pco.user_id = u.id
+                WHERE pc.id = ?
+                """, chapterId)
+        );
+
+        // Lấy pages nếu là chapter ảnh
+        try {
+            java.util.List<String> pages = jdbcTemplate.queryForList(
+                    "SELECT image_url FROM published_chapter_pages WHERE chapter_id = ? ORDER BY sort_order ASC",
+                    String.class, chapterId);
+            if (!pages.isEmpty()) result.put("pages", pages);
+        } catch (Exception ignored) {}
+
+        // Lấy nội dung chương gốc bị trùng lặp (nếu có)
+        Object matchedId = result.get("matched_chapter_id");
+        if (matchedId != null) {
+            try {
+                java.util.Map<String, Object> matched = new java.util.LinkedHashMap<>(jdbcTemplate.queryForMap("""
+                        SELECT pc.id, pc.chapter_no, pc.title, pc.content,
+                               pco.title AS comic_title, pco.slug AS comic_slug
+                        FROM published_chapters pc
+                        JOIN published_comics pco ON pc.comic_id = pco.id
+                        WHERE pc.id = ?
+                        """, ((Number) matchedId).longValue()));
+                // Pages của chapter gốc (nếu có)
+                java.util.List<String> matchedPages = jdbcTemplate.queryForList(
+                        "SELECT image_url FROM published_chapter_pages WHERE chapter_id = ? ORDER BY sort_order ASC",
+                        String.class, ((Number) matchedId).longValue());
+                if (!matchedPages.isEmpty()) matched.put("pages", matchedPages);
+                result.put("matchedChapter", matched);
+            } catch (Exception ignored) {}
+        }
+
+        return result;
+    }
+
+    public java.util.List<java.util.Map<String, Object>> getPendingChapters() {
+        return jdbcTemplate.queryForList("""
+                SELECT pc.id, pc.chapter_no, pc.title, pc.moderation_reason,
+                       pc.published_at, pco.title AS comic_title, pco.slug AS comic_slug,
+                       u.display_name AS author_name
+                FROM published_chapters pc
+                JOIN published_comics pco ON pc.comic_id = pco.id
+                JOIN users u ON pco.user_id = u.id
+                WHERE pc.status = 'PENDING_REVIEW'
+                ORDER BY pc.published_at ASC
+                """);
+    }
+
+    public void approveChapter(Long chapterId) {
+        jdbcTemplate.update("""
+                UPDATE published_chapters SET status = 'PUBLISHED', moderation_reason = NULL
+                WHERE id = ? AND status = 'PENDING_REVIEW'
+                """, chapterId);
+        // Gửi thông báo cho tác giả
+        try {
+            java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                    SELECT pco.user_id, pc.title AS chapter_title, pco.slug, pc.id AS chapter_id
+                    FROM published_chapters pc
+                    JOIN published_comics pco ON pc.comic_id = pco.id
+                    WHERE pc.id = ?
+                    """, chapterId);
+            if (!rows.isEmpty()) {
+                java.util.Map<String, Object> row = rows.get(0);
+                Long authorId = ((Number) row.get("user_id")).longValue();
+                String chapterTitle = (String) row.get("chapter_title");
+                String slug = (String) row.get("slug");
+                notificationService.createNotification(authorId, "MODERATION",
+                        "Chương được duyệt xuất bản",
+                        "\"" + chapterTitle + "\" đã được Admin duyệt và hiển thị công khai.",
+                        chapterId, "/doc-truyen/" + slug + "/" + chapterId);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public void rejectChapter(Long chapterId, String reason) {
+        // Xóa chapter bị từ chối
+        try {
+            java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                    SELECT pco.user_id, pc.title AS chapter_title
+                    FROM published_chapters pc
+                    JOIN published_comics pco ON pc.comic_id = pco.id
+                    WHERE pc.id = ? AND pc.status = 'PENDING_REVIEW'
+                    """, chapterId);
+            if (!rows.isEmpty()) {
+                java.util.Map<String, Object> row = rows.get(0);
+                Long authorId = ((Number) row.get("user_id")).longValue();
+                String chapterTitle = (String) row.get("chapter_title");
+                notificationService.createNotification(authorId, "MODERATION",
+                        "Chương bị từ chối xuất bản",
+                        "\"" + chapterTitle + "\" bị Admin từ chối. Lý do: " + reason,
+                        chapterId, "/sang-tac?view=manage");
+            }
+        } catch (Exception ignored) {}
+        jdbcTemplate.update("DELETE FROM published_chapters WHERE id = ? AND status = 'PENDING_REVIEW'", chapterId);
+    }
+
+    /**
+     * Duyệt lại tất cả chapter đang PENDING vì AI offline.
+     * Gọi tự động khi AI Service khởi động lại.
+     */
+    public java.util.Map<String, Object> recheckSingleChapter(Long chapterId, ModerationService moderationService) {
+        java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT pc.id, pc.content, pco.id AS comic_id, pco.mode
+                FROM published_chapters pc
+                JOIN published_comics pco ON pc.comic_id = pco.id
+                WHERE pc.id = ? AND pc.status = 'PENDING_REVIEW'
+                """, chapterId);
+
+        if (rows.isEmpty()) return java.util.Map.of("error", "Chapter không tồn tại hoặc không ở trạng thái chờ duyệt");
+
+        java.util.Map<String, Object> row = rows.get(0);
+        Long comicId = ((Number) row.get("comic_id")).longValue();
+        String mode  = (String) row.get("mode");
+        String content = (String) row.get("content");
+
+        try {
+            ModerationService.ModerationResult result;
+            if ("text".equals(mode) && content != null && !content.isBlank()) {
+                result = moderationService.moderate(content, comicId);
+            } else {
+                java.util.List<String> urls = jdbcTemplate.queryForList(
+                        "SELECT image_url FROM published_chapter_pages WHERE chapter_id = ? ORDER BY sort_order ASC",
+                        String.class, chapterId);
+                result = moderationService.moderateImages(urls, comicId);
+            }
+
+            String newStatus;
+            String newReason;
+            switch (result.decision()) {
+                case APPROVED -> { newStatus = "PUBLISHED"; newReason = null; }
+                case REJECTED -> { newStatus = "REJECTED"; newReason = result.rejectReason(); }
+                case AI_UNAVAILABLE -> { return java.util.Map.of("status", "AI_UNAVAILABLE", "message", "AI Service chưa sẵn sàng, thử lại sau."); }
+                default -> { newStatus = "PENDING_REVIEW"; newReason = result.rejectReason(); }
+            }
+
+            jdbcTemplate.update("UPDATE published_chapters SET status=?, moderation_reason=? WHERE id=?", newStatus, newReason, chapterId);
+
+            if ("PUBLISHED".equals(newStatus)) {
+                try {
+                    java.util.List<java.util.Map<String, Object>> info = jdbcTemplate.queryForList(
+                            "SELECT pco.user_id, pc.title, pco.slug FROM published_chapters pc JOIN published_comics pco ON pc.comic_id=pco.id WHERE pc.id=?", chapterId);
+                    if (!info.isEmpty()) {
+                        Long uid = ((Number) info.get(0).get("user_id")).longValue();
+                        String title = (String) info.get(0).get("title");
+                        notificationService.createNotification(uid, "MODERATION", "Chương được AI duyệt lại", "\"" + title + "\" đã qua kiểm tra AI và được xuất bản.", chapterId, "/sang-tac?view=manage");
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            return java.util.Map.of("status", newStatus, "reason", newReason != null ? newReason : "");
+        } catch (Exception e) {
+            return java.util.Map.of("error", e.getMessage());
+        }
+    }
+
+    public java.util.Map<String, Object> recheckAiPendingChapters(ModerationService moderationService) {
+        // Lấy tất cả chapter đang chờ do AI unavailable
+        java.util.List<java.util.Map<String, Object>> pendingRows = jdbcTemplate.queryForList("""
+                SELECT pc.id, pc.content, pc.moderation_reason,
+                       pco.id AS comic_id, pco.mode
+                FROM published_chapters pc
+                JOIN published_comics pco ON pc.comic_id = pco.id
+                WHERE pc.status = 'PENDING_REVIEW'
+                  AND pc.moderation_reason LIKE '%AI tạm thời không khả dụng%'
+                """);
+
+        int approved = 0, rejected = 0, stillPending = 0;
+
+        for (java.util.Map<String, Object> row : pendingRows) {
+            Long chapterId = ((Number) row.get("id")).longValue();
+            Long comicId   = ((Number) row.get("comic_id")).longValue();
+            String mode    = (String) row.get("mode");
+            String content = (String) row.get("content");
+
+            try {
+                ModerationService.ModerationResult result;
+
+                if ("text".equals(mode) && content != null && !content.isBlank()) {
+                    result = moderationService.moderate(content, comicId);
+                } else if ("comic".equals(mode)) {
+                    java.util.List<String> urls = jdbcTemplate.queryForList(
+                            "SELECT image_url FROM published_chapter_pages WHERE chapter_id = ? ORDER BY sort_order ASC",
+                            String.class, chapterId);
+                    result = moderationService.moderateImages(urls, comicId);
+                } else {
+                    continue;
+                }
+
+                switch (result.decision()) {
+                    case APPROVED -> {
+                        jdbcTemplate.update("UPDATE published_chapters SET status='PUBLISHED', moderation_reason=NULL WHERE id=?", chapterId);
+                        // Index vào kho AI
+                        if ("text".equals(mode)) {
+                            final String fc = content; final Long fch = chapterId; final Long fco = comicId;
+                            new Thread(() -> moderationService.indexChapter(fco, fch, "", fc)).start();
+                        } else {
+                            java.util.List<String> urls = jdbcTemplate.queryForList(
+                                    "SELECT image_url FROM published_chapter_pages WHERE chapter_id = ? ORDER BY sort_order ASC",
+                                    String.class, chapterId);
+                            final Long fch = chapterId; final Long fco = comicId; final java.util.List<String> fu = urls;
+                            new Thread(() -> moderationService.indexImageChapter(fco, fch, "", fu)).start();
+                        }
+                        // Thông báo tác giả
+                        try {
+                            java.util.List<java.util.Map<String, Object>> info = jdbcTemplate.queryForList(
+                                    "SELECT pco.user_id, pc.title, pco.slug FROM published_chapters pc JOIN published_comics pco ON pc.comic_id=pco.id WHERE pc.id=?", chapterId);
+                            if (!info.isEmpty()) {
+                                Long uid = ((Number) info.get(0).get("user_id")).longValue();
+                                String title = (String) info.get(0).get("title");
+                                notificationService.createNotification(uid, "MODERATION", "Chương đã được AI duyệt", "\"" + title + "\" đã được AI kiểm duyệt và xuất bản.", chapterId, "/sang-tac?view=manage");
+                            }
+                        } catch (Exception ignored) {}
+                        approved++;
+                    }
+                    case REJECTED, PENDING_REVIEW -> {
+                        jdbcTemplate.update("UPDATE published_chapters SET moderation_reason=? WHERE id=?", result.rejectReason(), chapterId);
+                        stillPending++;
+                    }
+                    case AI_UNAVAILABLE -> stillPending++;
+                }
+            } catch (Exception e) {
+                stillPending++;
+            }
+        }
+
+        return java.util.Map.of("total", pendingRows.size(), "approved", approved, "rejected", rejected, "stillPending", stillPending);
+    }
+
     public java.util.Map<String, Object> getRevenueStats() {
         Long totalRevenue = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(amount), 0) FROM wallet_transactions WHERE reason LIKE 'Thu nhập chapter #%'",
@@ -875,8 +1146,29 @@ public class AdminService {
                 "UPDATE withdrawal_requests SET status = ?, admin_note = ?, processed_at = NOW() WHERE id = ?",
                 newStatus, adminNote, requestId);
 
+        // Tiền đã bị giữ lúc tạo yêu cầu
+        String note = adminNote == null ? "" : adminNote.trim();
         if ("APPROVED".equals(newStatus)) {
-            walletService.withdrawMoney(userId, amount, "Rút tiền doanh thu đã được duyệt");
+            // Tiền đã trừ rồi, không cần trừ lại
+            notificationService.sendNotificationToUser(
+                    userId,
+                    "Yêu cầu rút tiền được duyệt",
+                    String.format("Yêu cầu rút %,d xu đã được duyệt. Tiền sẽ chuyển về tài khoản ngân hàng trong 3–5 ngày làm việc.%s",
+                            amount, note.isEmpty() ? "" : " Ghi chú: " + note),
+                    "WITHDRAWAL",
+                    requestId
+            );
+        } else {
+            // Hoàn tiền lại cho tác giả
+            walletService.depositMoney(userId, amount, "Hoàn tiền yêu cầu rút #" + requestId + " bị từ chối");
+            notificationService.sendNotificationToUser(
+                    userId,
+                    "Yêu cầu rút tiền bị từ chối",
+                    String.format("Yêu cầu rút %,d xu đã bị từ chối. %,d xu đã được hoàn lại vào ví.%s",
+                            amount, amount, note.isEmpty() ? "" : " Lý do: " + note),
+                    "WITHDRAWAL",
+                    requestId
+            );
         }
     }
 

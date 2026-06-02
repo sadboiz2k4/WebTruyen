@@ -181,3 +181,10 @@ export async function publishDraftChapterApi(mode, draftChapterId, scheduledAt) 
   });
   return parseResponse(response);
 }
+
+export async function getPendingChaptersApi() {
+  const response = await fetch(`${API_BASE}/api/author-workspace/chapters/pending`, {
+    credentials: 'include',
+  });
+  return parseResponse(response);
+}

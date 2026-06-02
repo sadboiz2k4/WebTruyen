@@ -12,7 +12,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -78,6 +80,14 @@ public class WalletController {
                     platform_fee BIGINT NOT NULL,
                     message TEXT,
                     from_display_name VARCHAR(255),
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS user_bank_accounts (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    bank_info TEXT NOT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
@@ -261,10 +271,17 @@ public class WalletController {
         if (pending != null && pending > 0)
             return ResponseEntity.badRequest().body(Map.of("message", "Bạn đã có yêu cầu rút tiền đang chờ xử lý"));
 
-        // Check balance
+        // Check balance và giữ tiền ngay
         long balance = walletService.getBalance(userId);
         if (balance < amount)
             return ResponseEntity.badRequest().body(Map.of("message", "Số dư không đủ"));
+
+        // Trừ tiền trước để giữ chỗ
+        try {
+            walletService.withdrawMoney(userId, amount, "Tạm giữ chờ duyệt rút tiền");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Số dư không đủ"));
+        }
 
         jdbcTemplate.update(
             "INSERT INTO withdrawal_requests(user_id, amount, bank_info, note) VALUES(?,?,?,?)",
@@ -297,6 +314,41 @@ public class WalletController {
             "total", total == null ? 0 : total,
             "page", page
         ));
+    }
+
+    // ── Bank Accounts ────────────────────────────────────────────────────────
+
+    @GetMapping("/bank-accounts")
+    public ResponseEntity<?> getBankAccounts(HttpSession session) {
+        Long userId = getSessionUserId(session);
+        if (userId == null) return ResponseEntity.status(401).body(Map.of("message", "Chưa đăng nhập"));
+        var rows = jdbcTemplate.queryForList(
+                "SELECT id, bank_info, DATE_FORMAT(created_at,'%Y-%m-%d') AS created_at " +
+                "FROM user_bank_accounts WHERE user_id = ? ORDER BY created_at DESC LIMIT 10",
+                userId);
+        return ResponseEntity.ok(rows);
+    }
+
+    @PostMapping("/bank-accounts")
+    public ResponseEntity<?> saveBankAccount(HttpSession session, @RequestBody Map<String, String> body) {
+        Long userId = getSessionUserId(session);
+        if (userId == null) return ResponseEntity.status(401).body(Map.of("message", "Chưa đăng nhập"));
+        String bankInfo = body.getOrDefault("bankInfo", "").trim();
+        if (bankInfo.isBlank()) return ResponseEntity.badRequest().body(Map.of("message", "Thông tin ngân hàng không được trống"));
+        Long count = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM user_bank_accounts WHERE user_id = ?", Long.class, userId);
+        if (count != null && count >= 5) return ResponseEntity.badRequest().body(Map.of("message", "Tối đa 5 tài khoản được lưu"));
+        jdbcTemplate.update("INSERT INTO user_bank_accounts(user_id, bank_info) VALUES(?,?)", userId, bankInfo);
+        Long newId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return ResponseEntity.ok(Map.of("id", newId, "bankInfo", bankInfo));
+    }
+
+    @DeleteMapping("/bank-accounts/{id}")
+    public ResponseEntity<?> deleteBankAccount(@PathVariable Long id, HttpSession session) {
+        Long userId = getSessionUserId(session);
+        if (userId == null) return ResponseEntity.status(401).body(Map.of("message", "Chưa đăng nhập"));
+        int rows = jdbcTemplate.update("DELETE FROM user_bank_accounts WHERE id = ? AND user_id = ?", id, userId);
+        if (rows == 0) return ResponseEntity.status(404).body(Map.of("message", "Không tìm thấy tài khoản"));
+        return ResponseEntity.ok(Map.of("success", true));
     }
 
     // ── VNPay ────────────────────────────────────────────────────────────────

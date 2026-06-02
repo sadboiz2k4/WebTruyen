@@ -36,7 +36,8 @@ export default function ReportModal({ isOpen, targetType, targetId, targetTitle,
       onSuccess?.();
       onClose();
     } catch (err) {
-      setError(err?.message || 'Lỗi khi gửi báo cáo. Vui lòng thử lại.');
+      const msg = err?.message || 'Lỗi khi gửi báo cáo. Vui lòng thử lại.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -85,7 +86,11 @@ export default function ReportModal({ isOpen, targetType, targetId, targetTitle,
               />
             )}
 
-            {error && <p className="error-message">{error}</p>}
+            {error && (
+              <p className={error.includes('đã báo cáo') ? 'info-message' : 'error-message'}>
+                {error.includes('đã báo cáo') ? 'ℹ️ ' : '⚠️ '}{error}
+              </p>
+            )}
 
             <div className="modal-actions">
               <button type="button" className="btn-secondary" onClick={onClose}>
@@ -213,6 +218,20 @@ export default function ReportModal({ isOpen, targetType, targetId, targetTitle,
 
         .error-message {
           color: #d32f2f;
+          background: #fff5f5;
+          border: 1px solid #fca5a5;
+          border-radius: 6px;
+          padding: 10px 14px;
+          font-size: 14px;
+          margin: 10px 0;
+        }
+
+        .info-message {
+          color: #92400e;
+          background: #fffbeb;
+          border: 1px solid #fcd34d;
+          border-radius: 6px;
+          padding: 10px 14px;
           font-size: 14px;
           margin: 10px 0;
         }

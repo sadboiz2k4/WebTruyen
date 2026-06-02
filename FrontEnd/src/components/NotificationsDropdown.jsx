@@ -21,6 +21,7 @@ export default function NotificationsDropdown() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -56,9 +57,7 @@ export default function NotificationsDropdown() {
           prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
         );
         setUnreadCount((c) => Math.max(0, c - 1));
-      } catch (error) {
-        console.error('Failed to mark notification as read:', error);
-      }
+      } catch (error) {}
     }
     if (notif.type === 'REPORT') {
       setIsOpen(false);
@@ -66,6 +65,9 @@ export default function NotificationsDropdown() {
     } else if (notif.relatedUrl) {
       setIsOpen(false);
       navigate(notif.relatedUrl);
+    } else {
+      // Không có URL → toggle expand để đọc full message
+      setExpandedId((prev) => (prev === notif.id ? null : notif.id));
     }
   };
 
@@ -121,11 +123,19 @@ export default function NotificationsDropdown() {
                   </div>
                   <div className="notification-content">
                     <div className="notification-title">{notif.title}</div>
-                    <div className="notification-message">
+                    <div
+                      className="notification-message"
+                      style={expandedId === notif.id ? { WebkitLineClamp: 'unset', overflow: 'visible', display: 'block' } : {}}
+                    >
                       {notif.message && notif.message.split('\n').map((line, i) => (
                         <div key={i}>{line}</div>
                       ))}
                     </div>
+                    {!notif.relatedUrl && notif.type !== 'REPORT' && (
+                      <div style={{ fontSize: 11, color: '#1976d2', marginTop: 2 }}>
+                        {expandedId === notif.id ? '▲ Thu gọn' : '▼ Xem thêm'}
+                      </div>
+                    )}
                     <div className="notification-time">{notif.createdAt}</div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
