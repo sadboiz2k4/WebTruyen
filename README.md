@@ -10,7 +10,7 @@ Dự án web đọc truyện full-stack với hệ thống kiểm duyệt nội 
 |---|---|
 | **Đọc truyện** | Đọc truyện chữ & truyện tranh, lịch sử đọc, theo dõi tác giả/truyện, xếp hạng |
 | **Sáng tác** | Workspace tác giả, đăng chương (text & ảnh), lên lịch đăng, quản lý doanh thu |
-| **Kiểm duyệt AI** | Phát hiện reup (đạo văn) bằng PhoBERT embedding + phát hiện vi phạm ngôn ngữ |
+| **Kiểm duyệt AI** | Phát hiện đạo văn / reup truyện chữ (PhoBERT embedding), reup ảnh (pHash), ảnh đồi trụy / 18+ (NudeNet), vi phạm ngôn ngữ (PhoBERT fine-tuned + Perspective API) |
 | **Quản trị** | Trang admin: duyệt chapter, quản lý báo cáo, kháng nghị, người dùng, giao dịch |
 | **Ví & thanh toán** | Hệ thống xu (coin), mở khóa chapter trả phí, rút tiền cho tác giả |
 | **Tài khoản** | Đăng ký/đăng nhập, Google OAuth, quên mật khẩu qua email |
@@ -239,6 +239,6 @@ AI Service không phản hồi
 
 ## Nhóm phát triển
 
-Dự án được phát triển bởi sinh viên đại học Nông Lâm TPHCM — đồ án môn học.
+Dự án được phát triển bởi sinh viên Trường ĐH Nông Lâm TPHCM— đồ án môn học.
 
 > Lưu ý: Đây là dự án học thuật, không sử dụng cho mục đích thương mại.
