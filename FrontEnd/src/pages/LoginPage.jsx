@@ -82,7 +82,7 @@ export default function LoginPage() {
               ) : null}
 
               <div className="login-links">
-                <a href="#">Quên mật khẩu</a>
+                <Link to="/forgot-password">Quên mật khẩu</Link>
                 <Link to="/register">Đăng ký</Link>
               </div>
 

@@ -96,6 +96,24 @@ export async function changePasswordApi(oldPassword, newPassword) {
   return parseResponse(response);
 }
 
+export async function forgotPasswordApi(email) {
+  const response = await fetch(`${API_BASE}/api/auth/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  return parseResponse(response);
+}
+
+export async function resetPasswordApi(token, newPassword) {
+  const response = await fetch(`${API_BASE}/api/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, newPassword }),
+  });
+  return parseResponse(response);
+}
+
 export async function googleLoginApi(credential) {
   const response = await fetch(`${API_BASE}/api/auth/google`, {
     method: 'POST',

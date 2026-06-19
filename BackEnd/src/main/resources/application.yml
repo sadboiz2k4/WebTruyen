@@ -25,6 +25,17 @@ spring:
     database-platform: org.hibernate.dialect.MySQL8Dialect
     hibernate:
       ddl-auto: none
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
 
 vnpay:
   tmn-code: ${VNPAY_TMN_CODE:WVY84N4N}
@@ -40,6 +51,10 @@ momo:
   endpoint: ${MOMO_ENDPOINT:https://test-payment.momo.vn/v2/gateway/api/create}
   redirect-url: ${MOMO_REDIRECT_URL:http://localhost:8080/api/wallet/momo/return}
   ipn-url: ${MOMO_IPN_URL:http://localhost:8080/api/wallet/momo/ipn}
+
+ai:
+  moderation:
+    url: ${AI_MODERATION_URL:http://localhost:5000}
 
 app:
   google:

@@ -8,15 +8,15 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faBookOpen, faCoins, faChartBar, faLandmark, faChartLine,
   faEye, faCommentDots, faHourglass, faCircleCheck, faCircleXmark,
-  faUsers, faStar, faBook, faLockOpen, faFile, faPenToSquare, faChevronDown,
+  faUsers, faStar, faBook, faLockOpen, faFile, faPenToSquare, faChevronDown, faHeart,
 } from '@fortawesome/free-solid-svg-icons';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { uploadImageApi } from '../services/uploadApi';
-import { commitChapterDraftApi, deleteDraftChapterApi, deleteCommentAsAuthorApi, deletePublishedChapterApi, deleteStoryApi, getAuthorDraftApi, getAuthorRevenueApi, getAllAuthorRevenueApi, getAuthorMonthlyRevenueApi, getMyComicsApi, getStoryCommentsApi, getStoryStatsApi, publishAuthorDraftApi, publishDraftChapterApi, saveAuthorDraftApi, swapChaptersApi, updateStoryInfoApi, updateStoryStatusApi } from '../services/sangTacApi';
+import { commitChapterDraftApi, deleteDraftChapterApi, deleteCommentAsAuthorApi, deletePublishedChapterApi, deleteStoryApi, getAuthorDraftApi, getAuthorRevenueApi, getAllAuthorRevenueApi, getAuthorMonthlyRevenueApi, getMyComicsApi, getStoryCommentsApi, getStoryStatsApi, publishAuthorDraftApi, publishDraftChapterApi, saveAuthorDraftApi, swapChaptersApi, updateStoryInfoApi, updateStoryStatusApi, getPendingChaptersApi, getAiHealthApi } from '../services/sangTacApi';
 import { getAllMyComicsStatsApi } from '../services/authorAnalyticsApi';
 import { getPublishedChapterDetailApi, getPublishedComicDetailApi } from '../services/publicComicApi';
-import { requestWithdrawalApi, getWithdrawalRequestsApi } from '../services/walletApi';
+import { requestWithdrawalApi, getWithdrawalRequestsApi, getSavedBankAccountsApi, saveBankAccountApi, deleteBankAccountApi } from '../services/walletApi';
 
 const initialTextChapters = [];
 
@@ -278,11 +278,22 @@ export default function SangTacPage() {
     }
   };
   const [searchParams, setSearchParams] = useSearchParams();
-  const viewMode = searchParams.get('view') === 'editor' ? 'editor' : 'manage';
-  const setViewMode = (mode) => {
-    setSearchParams({ view: mode }, { replace: true });
+  const setMainTab = (t) => {
+    setMainTabState(t);
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.set('tab', t); if (t !== 'revenue') p.delete('subtab'); return p; }, { replace: true });
   };
-  const [mode, setMode] = useState('text');
+  const setRevenueSubTab = (s) => {
+    setRevenueSubTabState(s);
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.set('subtab', s); return p; }, { replace: true });
+  };
+  const viewMode = searchParams.get('view') === 'editor' ? 'editor' : 'manage';
+  const setViewMode = (v) => {
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.set('view', v); return p; }, { replace: true });
+  };
+  const mode = searchParams.get('mode') === 'comic' ? 'comic' : 'text';
+  const setMode = (newMode) => {
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.set('mode', newMode); return p; }, { replace: true });
+  };
   const [textPublishedComic, setTextPublishedComic] = useState(null);
   const [textPublishedLoading, setTextPublishedLoading] = useState(false);
   const [textTargetChapterId, setTextTargetChapterId] = useState('');
@@ -304,6 +315,7 @@ export default function SangTacPage() {
   const [deletingChapterId, setDeletingChapterId] = useState('');
   const [myComics, setMyComics] = useState([]);
   const [myComicsLoading, setMyComicsLoading] = useState(true);
+  const [pendingChapters, setPendingChapters] = useState([]);
   const [selectedStory, setSelectedStory] = useState(null);
   const [selectedComicDetail, setSelectedComicDetail] = useState(null);
   const [selectedComicDetailLoading, setSelectedComicDetailLoading] = useState(false);
@@ -319,18 +331,27 @@ export default function SangTacPage() {
   const [storyRevenueLoading, setStoryRevenueLoading] = useState(false);
   const [storyRevenueOpen, setStoryRevenueOpen] = useState(false);
   const [scheduledAt, setScheduledAt] = useState('');
-  const [mainTab, setMainTab] = useState('workspace');
+  const _searchParamsForTab = new URLSearchParams(window.location.search);
+  const [mainTab, setMainTabState] = useState(() => {
+    const t = _searchParamsForTab.get('tab');
+    return t === 'revenue' || t === 'analytics' ? t : 'workspace';
+  });
   const [allRevenue, setAllRevenue] = useState(null);
   const [allRevenueLoading, setAllRevenueLoading] = useState(false);
   const [allComicsStats, setAllComicsStats] = useState(null);
   const [allComicsStatsLoading, setAllComicsStatsLoading] = useState(false);
   const [allComicsStatsError, setAllComicsStatsError] = useState(null);
   const [statsSortKey, setStatsSortKey] = useState('totalViews');
-  const [revenueSubTab, setRevenueSubTab] = useState('dashboard');
+  const [revenueSubTab, setRevenueSubTabState] = useState(() => {
+    const s = _searchParamsForTab.get('subtab');
+    return s === 'withdraw' ? 'withdraw' : 'dashboard';
+  });
   const [monthlyRevenue, setMonthlyRevenue] = useState(null);
   const [monthlyRevenueLoading, setMonthlyRevenueLoading] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawBankInfo, setWithdrawBankInfo] = useState('');
+  const [savedBankAccounts, setSavedBankAccounts] = useState([]);
+  const [savingAccount, setSavingAccount] = useState(false);
   const [withdrawNote, setWithdrawNote] = useState('');
   const [withdrawMsg, setWithdrawMsg] = useState('');
   const [expandedComics, setExpandedComics] = useState(new Set());
@@ -350,6 +371,10 @@ export default function SangTacPage() {
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [workspacePublishing, setWorkspacePublishing] = useState(false);
   const [workspaceMessage, setWorkspaceMessage] = useState('');
+  const autoSaveTimerRef = useRef(null);
+  const autoSaveReadyRef = useRef(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState('');
+  const [aiStatus, setAiStatus] = useState(null); // null=loading, 'online'|'offline'|'partial'
 
   const previewStyle = useMemo(() => ({
     fontFamily: textStory.fontFamily || 'Lora',
@@ -1162,10 +1187,67 @@ export default function SangTacPage() {
       .catch(() => {})
       .finally(() => { if (mounted) setMyComicsLoading(false); });
 
+    getPendingChaptersApi()
+      .then((data) => { if (mounted) setPendingChapters(Array.isArray(data) ? data : []); })
+      .catch(() => {});
+
     return () => {
       mounted = false;
     };
   }, []);
+
+  // Check AI service health on mount
+  useEffect(() => {
+    getAiHealthApi()
+      .then((data) => {
+        if (data.embeddingModelLoaded === false) {
+          setAiStatus('partial');
+        } else {
+          setAiStatus('online');
+        }
+      })
+      .catch(() => setAiStatus('offline'));
+  }, []);
+
+  // Keep a ref with latest draft state to avoid stale closures inside auto-save timer
+  const latestDraftRef = useRef({});
+  useEffect(() => {
+    latestDraftRef.current = { mode, textStory, textChapters, textTargetChapterId, comicStory, comicChapters, comicPages, comicTargetChapterId };
+  });
+
+  // Enable auto-save after initial load settles (500ms buffer so load doesn't trigger a save)
+  useEffect(() => {
+    if (!workspaceLoading) {
+      const t = setTimeout(() => { autoSaveReadyRef.current = true; }, 500);
+      return () => clearTimeout(t);
+    }
+  }, [workspaceLoading]);
+
+  // Auto-save 3 seconds after user stops editing
+  useEffect(() => {
+    if (!autoSaveReadyRef.current) return;
+    clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(async () => {
+      const d = latestDraftRef.current;
+      const hasContent = d.mode === 'text'
+        ? (d.textStory.content || '').trim().length > 0
+        : d.comicPages.length > 0;
+      if (!hasContent) return;
+      setAutoSaveStatus('saving');
+      try {
+        const payload = d.mode === 'text'
+          ? { ...d.textStory, coverUrl: d.textStory.coverPreview, targetChapterId: d.textTargetChapterId ? Number(d.textTargetChapterId) : null, chapters: d.textChapters }
+          : { ...d.comicStory, coverUrl: d.comicStory.coverPreview, targetChapterId: d.comicTargetChapterId ? Number(d.comicTargetChapterId) : null, chapters: d.comicChapters, pages: d.comicPages };
+        await saveAuthorDraftApi(d.mode, payload);
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus((s) => (s === 'saved' ? '' : s)), 2000);
+      } catch {
+        setAutoSaveStatus('');
+      }
+    }, 3000);
+    return () => clearTimeout(autoSaveTimerRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textStory.content, textStory.chapterTitle, comicPages.length]);
 
   const saveDraft = async (targetMode) => {
     setWorkspaceSaving(true);
@@ -1207,6 +1289,26 @@ export default function SangTacPage() {
   };
 
   const publishDraft = async () => {
+    // Validation trước khi đăng
+    const story = mode === 'comic' ? comicStory : textStory;
+    const defaultTitles = ['Bản thảo truyện hình', 'Bản thảo truyện chữ'];
+    if (!story.title?.trim() || defaultTitles.includes(story.title.trim())) {
+      setWorkspaceMessage('⚠️ Vui lòng nhập tên truyện trước khi đăng.');
+      return;
+    }
+    if (!story.slug?.trim() || ['ban-thao-truyen-hinh', 'ban-thao-truyen-chu'].includes(story.slug.trim())) {
+      setWorkspaceMessage('⚠️ Vui lòng nhập đường dẫn (slug) cho truyện trước khi đăng.');
+      return;
+    }
+    if (mode === 'comic' && comicPages.length === 0) {
+      setWorkspaceMessage('⚠️ Vui lòng upload ít nhất 1 trang ảnh trước khi đăng.');
+      return;
+    }
+    if (mode === 'text' && !story.content?.trim()) {
+      setWorkspaceMessage('⚠️ Vui lòng nhập nội dung chương trước khi đăng.');
+      return;
+    }
+
     setWorkspacePublishing(true);
     setWorkspaceMessage('');
 
@@ -1239,8 +1341,17 @@ export default function SangTacPage() {
           pages: [],
         }).catch(() => {});
         refreshPublishedComic(published.slug).catch(() => {});
-        getMyComicsApi().then((comics) => setMyComics(Array.isArray(comics) ? comics : [])).catch(() => {});
-        setWorkspaceMessage(scheduledAt ? `Đã hẹn giờ đăng: ${published.chapterTitle}` : `Đã đăng thành công: ${published.chapterTitle}`);
+        await Promise.all([
+          getMyComicsApi().then((comics) => setMyComics(Array.isArray(comics) ? comics : [])).catch(() => {}),
+          getPendingChaptersApi().then((data) => setPendingChapters(Array.isArray(data) ? data : [])).catch(() => {}),
+        ]);
+        if (published.chapterStatus === 'REJECTED') {
+          setWorkspaceMessage(`❌ Chương bị từ chối: ${published.chapterTitle}`);
+        } else if (published.chapterStatus === 'PENDING_REVIEW') {
+          setWorkspaceMessage(`⏳ Chương đang chờ Admin xét duyệt: ${published.chapterTitle}`);
+        } else {
+          setWorkspaceMessage(scheduledAt ? `Đã hẹn giờ đăng: ${published.chapterTitle}` : `✅ Đã đăng thành công: ${published.chapterTitle}`);
+        }
         setScheduledAt('');
         setViewMode('manage');
       } else if (mode === 'text' && published?.slug && published?.chapterId) {
@@ -1267,17 +1378,33 @@ export default function SangTacPage() {
           pages: [],
         }).catch(() => {});
         refreshTextPublishedComic(published.slug).catch(() => {});
-        getMyComicsApi().then((comics) => setMyComics(Array.isArray(comics) ? comics : [])).catch(() => {});
-        setWorkspaceMessage(scheduledAt ? `Đã hẹn giờ đăng: ${published.chapterTitle}` : `Đã đăng thành công: ${published.chapterTitle}`);
+        await Promise.all([
+          getMyComicsApi().then((comics) => setMyComics(Array.isArray(comics) ? comics : [])).catch(() => {}),
+          getPendingChaptersApi().then((data) => setPendingChapters(Array.isArray(data) ? data : [])).catch(() => {}),
+        ]);
+        if (published.chapterStatus === 'REJECTED') {
+          setWorkspaceMessage(`❌ Chương bị từ chối: ${published.chapterTitle}`);
+        } else if (published.chapterStatus === 'PENDING_REVIEW') {
+          setWorkspaceMessage(`⏳ Chương đang chờ Admin xét duyệt: ${published.chapterTitle}`);
+        } else {
+          setWorkspaceMessage(scheduledAt ? `Đã hẹn giờ đăng: ${published.chapterTitle}` : `✅ Đã đăng thành công: ${published.chapterTitle}`);
+        }
         setScheduledAt('');
         setViewMode('manage');
       } else {
-        setWorkspaceMessage('Đã đăng thành công.');
+        setWorkspaceMessage('✅ Đã đăng thành công.');
         setScheduledAt('');
         setViewMode('manage');
       }
     } catch (error) {
-      setWorkspaceMessage(error.message || 'Dang that bai.');
+      const msg = error.message || 'Đăng thất bại.';
+      if (msg.includes('không được phép xuất bản') || msg.includes('Nội dung không')) {
+        setWorkspaceMessage('❌ Kiểm duyệt từ chối: ' + msg);
+      } else if (msg.includes('cần xét duyệt') || msg.includes('PENDING')) {
+        setWorkspaceMessage('⏳ Nội dung đang chờ xét duyệt thủ công. Admin sẽ xem xét và thông báo kết quả cho bạn qua hệ thống thông báo.');
+      } else {
+        setWorkspaceMessage('❌ ' + msg);
+      }
     } finally {
       setWorkspacePublishing(false);
     }
@@ -1486,6 +1613,13 @@ export default function SangTacPage() {
               <p>
                 Một giao diện gọn hơn để viết truyện chữ, quản lý truyện hình, upload ảnh và theo dõi chapter.
               </p>
+              <div className={`ai-status-badge ai-status-badge--${aiStatus || 'loading'}`}>
+                <span className="ai-status-dot" />
+                {aiStatus === null && 'Đang kiểm tra AI kiểm duyệt...'}
+                {aiStatus === 'online' && 'AI kiểm duyệt: Hoạt động'}
+                {aiStatus === 'partial' && 'AI kiểm duyệt: Hoạt động (không có model phát hiện reup)'}
+                {aiStatus === 'offline' && 'AI kiểm duyệt: Không hoạt động — chapter sẽ chờ duyệt thủ công'}
+              </div>
               <div className="workspace-main-tabs">
                 <button
                   type="button"
@@ -1565,6 +1699,12 @@ export default function SangTacPage() {
                     ) : null}
                   </div>
                   <div className="action-row">
+                    {autoSaveStatus === 'saving' && (
+                      <span className="autosave-indicator">⟳ Đang tự lưu...</span>
+                    )}
+                    {autoSaveStatus === 'saved' && (
+                      <span className="autosave-indicator autosave-indicator--saved">✓ Đã tự lưu</span>
+                    )}
                     <button
                       type="button"
                       className="ghost-btn"
@@ -1579,7 +1719,7 @@ export default function SangTacPage() {
                       disabled={workspaceSaving || workspacePublishing || workspaceLoading}
                       onClick={publishDraft}
                     >
-                      {workspacePublishing ? 'Dang dang...' : scheduledAt ? 'Hẹn giờ đăng' : 'Đăng'}
+                      {workspacePublishing ? '⏳ Đang kiểm duyệt...' : scheduledAt ? 'Hẹn giờ đăng' : 'Đăng'}
                     </button>
                   </div>
                 </>
@@ -1595,7 +1735,17 @@ export default function SangTacPage() {
           </section>
 
           {uploadMessage ? <div className="tip-box">{uploadMessage}</div> : null}
-          {workspaceMessage ? <div className="tip-box">{workspaceMessage}</div> : null}
+          {workspacePublishing ? (
+            <div className="tip-box" style={{ background: '#f0f4ff', border: '1px solid #a5b4fc', color: '#3730a3', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 20 }}>⏳</span>
+              <div>
+                <strong>Đang kiểm duyệt nội dung...</strong>
+                <p style={{ margin: '2px 0 0', fontSize: 13, opacity: 0.8 }}>
+                  Hệ thống AI đang kiểm tra reup và vi phạm ngôn ngữ. Vui lòng đợi trong giây lát.
+                </p>
+              </div>
+            </div>
+          ) : workspaceMessage ? <div className="tip-box">{workspaceMessage}</div> : null}
 
           {mainTab === 'revenue' ? (
             <section className="revenue-dashboard">
@@ -1632,6 +1782,7 @@ export default function SangTacPage() {
                         .catch(() => setWithdrawHistory({ data: [], total: 0 }))
                         .finally(() => setWithdrawHistoryLoading(false));
                     }
+                    getSavedBankAccountsApi().then(setSavedBankAccounts).catch(() => {});
                   }}
                 >
                   <FontAwesomeIcon icon={faLandmark} /> Yêu cầu rút tiền
@@ -1656,6 +1807,33 @@ export default function SangTacPage() {
                         className="withdraw-input"
                       />
                     </div>
+                    {savedBankAccounts.length > 0 && (
+                      <div className="withdraw-field">
+                        <label>Tài khoản đã lưu</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {savedBankAccounts.map((acc) => (
+                            <div key={acc.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: 6, padding: '6px 10px' }}>
+                              <button
+                                type="button"
+                                style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#333', padding: 0 }}
+                                onClick={() => setWithdrawBankInfo(acc.bank_info)}
+                              >
+                                {acc.bank_info}
+                              </button>
+                              <button
+                                type="button"
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc3545', fontSize: 12, padding: '0 4px', flexShrink: 0 }}
+                                onClick={async () => {
+                                  await deleteBankAccountApi(acc.id).catch(() => {});
+                                  setSavedBankAccounts(prev => prev.filter(a => a.id !== acc.id));
+                                }}
+                                title="Xóa tài khoản này"
+                              >✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="withdraw-field">
                       <label>Thông tin ngân hàng <span style={{ color: '#e74c3c' }}>*</span></label>
                       <textarea
@@ -1665,6 +1843,24 @@ export default function SangTacPage() {
                         className="withdraw-input withdraw-textarea"
                         rows={2}
                       />
+                      {withdrawBankInfo.trim() && !savedBankAccounts.some(a => a.bank_info === withdrawBankInfo.trim()) && (
+                        <button
+                          type="button"
+                          style={{ marginTop: 6, fontSize: 12, background: 'none', border: '1px solid #58b947', color: '#58b947', borderRadius: 4, padding: '3px 10px', cursor: 'pointer' }}
+                          disabled={savingAccount}
+                          onClick={async () => {
+                            if (savedBankAccounts.length >= 5) { setWithdrawMsg('Tối đa 5 tài khoản được lưu'); return; }
+                            setSavingAccount(true);
+                            try {
+                              const saved = await saveBankAccountApi(withdrawBankInfo.trim());
+                              setSavedBankAccounts(prev => [{ id: saved.id, bank_info: saved.bankInfo }, ...prev]);
+                            } catch (e) { setWithdrawMsg(e.message); }
+                            finally { setSavingAccount(false); }
+                          }}
+                        >
+                          {savingAccount ? 'Đang lưu...' : '+ Lưu tài khoản này'}
+                        </button>
+                      )}
                     </div>
                     <div className="withdraw-field">
                       <label>Ghi chú (tuỳ chọn)</label>
@@ -1795,6 +1991,8 @@ export default function SangTacPage() {
 
                 const monthlyChartData = (monthlyRevenue || []).map((d) => ({ month: d.month, revenue: Number(d.revenue) }));
 
+                const totalDonate = allComics.reduce((s, c) => s + (c.donateRevenue ?? 0), 0);
+
                 return (
                   <>
                     <div className="revenue-summary-grid">
@@ -1807,6 +2005,11 @@ export default function SangTacPage() {
                         <div className="revenue-summary-icon"><FontAwesomeIcon icon={faLockOpen} /></div>
                         <div className="revenue-summary-value">{totalUnlocks.toLocaleString()}</div>
                         <div className="revenue-summary-label">Lượt mở khóa</div>
+                      </div>
+                      <div className="revenue-summary-card revenue-summary-card--donate">
+                        <div className="revenue-summary-icon"><FontAwesomeIcon icon={faHeart} /></div>
+                        <div className="revenue-summary-value">{totalDonate.toLocaleString()}</div>
+                        <div className="revenue-summary-label">Từ ủng hộ (xu)</div>
                       </div>
                       <div className="revenue-summary-card">
                         <div className="revenue-summary-icon"><FontAwesomeIcon icon={faBookOpen} /></div>
@@ -1922,6 +2125,20 @@ export default function SangTacPage() {
                                         </tr>
                                       );
                                     })}
+                                    {(comic.donateRevenue ?? 0) > 0 && (
+                                      <tr className="revenue-row--earned revenue-row--donate">
+                                        <td className="revenue-rank-cell"><FontAwesomeIcon icon={faHeart} style={{ color: '#e91e8c' }} /></td>
+                                        <td><em>Ủng hộ (donate)</em></td>
+                                        <td>—</td>
+                                        <td className="revenue-cell-value">{(comic.donateRevenue).toLocaleString()} xu</td>
+                                        <td>
+                                          <div className="revenue-bar-wrap">
+                                            <div className="revenue-bar revenue-bar--donate" style={{ width: `${comicRevenue > 0 ? Math.round(comic.donateRevenue / comicRevenue * 100) : 0}%` }} />
+                                            <span className="revenue-bar-pct">{comicRevenue > 0 ? Math.round(comic.donateRevenue / comicRevenue * 100) : 0}%</span>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
                                   </tbody>
                                 </table>
                               </>
@@ -1966,12 +2183,22 @@ export default function SangTacPage() {
                 <div className="revenue-empty">Bạn chưa có truyện nào được đăng.</div>
               ) : allComicsStats ? (() => {
                 const sortKeys = [
-                  { key: 'totalViews',    label: <><FontAwesomeIcon icon={faEye} /> Lượt xem</> },
-                  { key: 'totalComments', label: <><FontAwesomeIcon icon={faCommentDots} /> Bình luận</> },
-                  { key: 'avgRating',     label: <><FontAwesomeIcon icon={faStar} /> Đánh giá</> },
-                  { key: 'totalFollows',  label: <><FontAwesomeIcon icon={faUsers} /> Theo dõi</> },
+                  { key: 'totalViews',    label: <><FontAwesomeIcon icon={faEye} /> Lượt xem</>,         str: 'Lượt xem',  color: '#4a90d9' },
+                  { key: 'totalComments', label: <><FontAwesomeIcon icon={faCommentDots} /> Bình luận</>, str: 'Bình luận', color: '#f17922' },
+                  { key: 'avgRating',     label: <><FontAwesomeIcon icon={faStar} /> Đánh giá</>,        str: 'Đánh giá',  color: '#f1c40f' },
+                  { key: 'totalFollows',  label: <><FontAwesomeIcon icon={faUsers} /> Theo dõi</>,       str: 'Theo dõi',  color: '#58b947' },
                 ];
                 const sorted = [...allComicsStats].sort((a, b) => (b[statsSortKey] ?? 0) - (a[statsSortKey] ?? 0));
+                const activeMeta = sortKeys.find(sk => sk.key === statsSortKey);
+                const PIE_COLORS = ['#4a90d9','#58b947','#f17922','#9b59b6','#e74c3c','#f1c40f','#2ecc71','#1abc9c'];
+                const barData = sorted.map(c => ({
+                  name: c.title.length > 22 ? c.title.slice(0, 22) + '…' : c.title,
+                  value: statsSortKey === 'avgRating' ? Number((c[statsSortKey] ?? 0).toFixed(2)) : (c[statsSortKey] ?? 0),
+                }));
+                const pieData = sorted.filter(c => (c[statsSortKey] ?? 0) > 0).map(c => ({
+                  name: c.title.length > 18 ? c.title.slice(0, 18) + '…' : c.title,
+                  value: statsSortKey === 'avgRating' ? Number((c[statsSortKey] ?? 0).toFixed(2)) : (c[statsSortKey] ?? 0),
+                }));
                 return (
                   <>
                     <div className="revenue-subtabs" style={{ marginBottom: 16 }}>
@@ -1986,6 +2213,47 @@ export default function SangTacPage() {
                         </button>
                       ))}
                     </div>
+
+                    {/* Charts */}
+                    <div style={{ display: 'grid', gridTemplateColumns: barData.length > 1 ? '1fr 320px' : '1fr', gap: 16, marginBottom: 24 }}>
+                      {/* Bar chart */}
+                      <div className="revenue-chart-card">
+                        <h4 className="revenue-chart-title">
+                          <FontAwesomeIcon icon={faChartBar} /> {activeMeta?.str} theo truyện
+                        </h4>
+                        <ResponsiveContainer width="100%" height={Math.max(160, barData.length * 42)}>
+                          <BarChart data={barData} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                            <XAxis type="number" tick={{ fontSize: 11 }} />
+                            <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11 }} />
+                            <Tooltip formatter={(v) => [Number(v).toLocaleString(), activeMeta?.str]} />
+                            <Bar dataKey="value" fill={activeMeta?.color ?? '#4a90d9'} radius={[0, 4, 4, 0]}
+                              label={{ position: 'right', fontSize: 11, fill: '#555', formatter: (v) => v > 0 ? Number(v).toLocaleString() : '' }} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+
+                      {/* Pie chart */}
+                      {pieData.length > 1 && (
+                        <div className="revenue-chart-card">
+                          <h4 className="revenue-chart-title">
+                            <FontAwesomeIcon icon={faChartBar} /> Tỉ lệ phân bổ
+                          </h4>
+                          <ResponsiveContainer width="100%" height={Math.max(160, barData.length * 42)}>
+                            <PieChart>
+                              <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%"
+                                outerRadius="65%" label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                                labelLine={false} fontSize={11}>
+                                {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                              </Pie>
+                              <Tooltip formatter={(v, name) => [Number(v).toLocaleString(), name]} />
+                              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </div>
+
                     <table className="revenue-table">
                       <thead>
                         <tr>
@@ -2090,18 +2358,40 @@ export default function SangTacPage() {
                         const hasDraft = comic.mode === 'text'
                           ? (textStory.slug === comic.slug && Boolean((textStory.chapterTitle || '').trim() || (textStory.content || '').trim()))
                           : (comicStory.slug === comic.slug && Boolean((comicStory.chapterTitle || '').trim() || comicPages.length > 0));
+                        const rejectedCount  = pendingChapters.filter(ch => ch.comic_slug === comic.slug && ch.status === 'REJECTED').length;
+                        const pendingCount   = pendingChapters.filter(ch => ch.comic_slug === comic.slug && ch.status === 'PENDING_REVIEW').length;
                         return (
                           <div key={comic.id} className="story-card" onClick={() => handleSelectStory(comic)}>
-                            <div className="story-card-cover">
+                            <div className="story-card-cover" style={{ position: 'relative' }}>
                               {comic.coverUrl
                                 ? <img src={comic.coverUrl} alt={comic.title} />
                                 : <div className="story-card-cover-empty">Chưa có bìa</div>}
+                              {rejectedCount > 0 && (
+                                <span style={{ position: 'absolute', top: 6, right: 6, background: '#dc2626', color: '#fff', borderRadius: 6, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>
+                                  ❌ {rejectedCount} bị từ chối
+                                </span>
+                              )}
+                              {pendingCount > 0 && (
+                                <span style={{ position: 'absolute', top: rejectedCount > 0 ? 28 : 6, right: 6, background: '#f59e0b', color: '#fff', borderRadius: 6, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>
+                                  ⏳ {pendingCount} chờ duyệt
+                                </span>
+                              )}
                             </div>
                             <div className="story-card-info">
                               <span className="story-card-mode">{comic.mode === 'text' ? 'Truyện chữ' : 'Truyện hình'}</span>
                               <strong className="story-card-title">{comic.title}</strong>
-                              <span className="story-card-chapters">{comic.chapterCount} chapter</span>
-                              {(() => {
+                              <span className="story-card-chapters">{comic.chapterCount} chapter đã đăng</span>
+                              {rejectedCount > 0 && (
+                                <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 600 }}>
+                                  {rejectedCount} chapter bị từ chối
+                                </span>
+                              )}
+                              {pendingCount > 0 && (
+                                <span style={{ fontSize: 11, color: '#b45309', fontWeight: 600 }}>
+                                  {pendingCount} chapter chờ Admin duyệt
+                                </span>
+                              )}
+                              {rejectedCount === 0 && pendingCount === 0 && (() => {
                                 const si = storyStatusInfo(comic.storyStatus);
                                 return (
                                   <span className="story-card-status-badge" style={{ color: si.color, background: si.bg, borderColor: si.border }}>
@@ -2119,6 +2409,40 @@ export default function SangTacPage() {
                 </>
               ) : (
                 <>
+                  {(() => {
+                    if (!selectedStory) return null;
+                    const storyRejected = pendingChapters.filter(ch => ch.comic_slug === selectedStory.slug && ch.status === 'REJECTED');
+                    const storyPending  = pendingChapters.filter(ch => ch.comic_slug === selectedStory.slug && ch.status === 'PENDING_REVIEW');
+                    return (
+                      <>
+                        {storyRejected.length > 0 && (
+                          <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 10, padding: '14px 18px', marginBottom: 14 }}>
+                            <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <FontAwesomeIcon icon={faCircleXmark} /> {storyRejected.length} chương bị từ chối — không hiển thị với độc giả
+                            </p>
+                            {storyRejected.map(ch => (
+                              <div key={ch.id} style={{ fontSize: 13, padding: '5px 0', borderTop: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Chương {ch.chapter_no}: <strong>{ch.title}</strong></span>
+                                <span style={{ color: '#991b1b', maxWidth: 320, textAlign: 'right' }}>Lý do: {ch.moderation_reason || 'Vi phạm nội dung'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {storyPending.length > 0 && (
+                          <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 10, padding: '14px 18px', marginBottom: 14 }}>
+                            <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#b45309', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <FontAwesomeIcon icon={faHourglass} /> {storyPending.length} chương đang chờ Admin xét duyệt
+                            </p>
+                            {storyPending.map(ch => (
+                              <div key={ch.id} style={{ fontSize: 13, padding: '5px 0', borderTop: '1px solid #fde68a' }}>
+                                Chương {ch.chapter_no}: <strong>{ch.title}</strong> — Đang chờ xem xét
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   <div className="story-detail-header">
                     <button type="button" className="ghost-btn" onClick={() => { setSelectedStory(null); setSelectedComicDetail(null); }}>
                       ← Tất cả truyện
@@ -2217,7 +2541,7 @@ export default function SangTacPage() {
                             </select>
                           ) : null}
                           <button type="button" className="primary-btn" onClick={() => handleWriteNewChapterForStory(selectedStory)}>
-                            + Viết chapter mới
+                            + Thêm chương mới
                           </button>
                           {selectedStory.id !== null && !storyInfoEditing ? (
                             <button type="button" className="secondary-btn" onClick={openStoryInfoEdit}>
@@ -2255,7 +2579,7 @@ export default function SangTacPage() {
                       <div className="manage-chapter-groups">
                         {publishedChapters.length === 0 && !showDraft ? (
                           <div className="manage-empty-state">
-                            <p>Truyện này chưa có chapter. Bấm <strong>"+ Viết chapter mới"</strong> để bắt đầu.</p>
+                            <p>Truyện này chưa có chapter. Bấm <strong>"+ Thêm chương mới"</strong> để bắt đầu.</p>
                           </div>
                         ) : (
                           <>
@@ -2307,7 +2631,7 @@ export default function SangTacPage() {
                                           disabled={workspacePublishing}
                                           onClick={() => handlePublishDraftChapterById(chapter.id)}
                                         >
-                                          Đăng
+                                          {workspacePublishing ? '⏳ Kiểm duyệt...' : 'Đăng'}
                                         </button>
                                         <button
                                           type="button"
@@ -2681,10 +3005,18 @@ export default function SangTacPage() {
                     <div className="toolbar-grid">
                       <label className="field">
                         <span>Font chữ</span>
-                        <FontPicker
+                        <select
                           value={textStory.fontFamily || 'Lora'}
-                          onChange={(font) => setTextStory((prev) => ({ ...prev, fontFamily: font }))}
-                        />
+                          onChange={(e) => setTextStory((prev) => ({ ...prev, fontFamily: e.target.value }))}
+                          style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--line)', fontSize: 14 }}
+                        >
+                          <option value="Lora">Lora (Serif)</option>
+                          <option value="Georgia">Georgia</option>
+                          <option value="'Times New Roman'">Times New Roman</option>
+                          <option value="'Segoe UI'">Segoe UI (Mặc định)</option>
+                          <option value="Arial">Arial</option>
+                          <option value="'Courier New'">Courier New (Monospace)</option>
+                        </select>
                       </label>
                       <label className="field">
                         <span>Cỡ chữ</span>

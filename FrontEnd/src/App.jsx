@@ -9,12 +9,16 @@ import ComicReaderPage from './pages/ComicReaderPage';
 import ChiTietTruyenPage from './pages/ChiTietTruyenPage';
 import AuthorPage from './pages/AuthorPage';
 import WalletPage from './pages/WalletPage';
-import AdminPage, { DashboardTab, UsersTab, ComicsTab, ChaptersTab, CommentsTab, ReportsTab, AppealsTab, TransactionsTab, WithdrawalsTab } from './pages/AdminPage';
+import AdminPage, { DashboardTab, UsersTab, ComicsTab, ChaptersTab, ModerationTab, CommentsTab, ReportsTab, AppealsTab, TransactionsTab, WithdrawalsTab } from './pages/AdminPage';
 import AdminReportDetailPage from './pages/AdminReportDetailPage';
 import AppealPage from './pages/AppealPage';
 import LichSuPage from './pages/LichSuPage';
 import TuTruyenPage from './pages/TuTruyenPage';
 import XepHangPage from './pages/XepHangPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
+import ProtectedRoute from './components/ProtectedRoute';
+import AdminRoute from './components/AdminRoute';
 
 export default function App() {
   return (
@@ -22,24 +26,34 @@ export default function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/tim-truyen" element={<TimTruyenPage />} />
-      <Route path="/sang-tac" element={<SangTacPage />} />
       <Route path="/doc-truyen/:slug" element={<ComicReaderPage />} />
       <Route path="/doc-truyen/:slug/:chapterId" element={<ComicReaderPage />} />
       <Route path="/chi-tiet-truyen/:slug" element={<ChiTietTruyenPage />} />
       <Route path="/chi-tiet-truyen/:slug/:chapterId" element={<ComicReaderPage />} />
       <Route path="/doc-truyen-chu/:slug" element={<ComicReaderPage />} />
       <Route path="/doc-truyen-chu/:slug/:chapterId" element={<ComicReaderPage />} />
-      <Route path="/tai-khoan" element={<TaiKhoanPage />} />
-      <Route path="/linh-thach" element={<TaiKhoanPage />} />
-      <Route path="/vi-xu" element={<WalletPage />} />
-      <Route path="/appeal/:reportId" element={<AppealPage />} />
       <Route path="/tac-gia/:authorName" element={<AuthorPage />} />
-      <Route path="/admin" element={<AdminPage />}>
+      <Route path="/xep-hang" element={<XepHangPage />} />
+
+      {/* Yêu cầu đăng nhập */}
+      <Route path="/sang-tac" element={<ProtectedRoute><SangTacPage /></ProtectedRoute>} />
+      <Route path="/tai-khoan" element={<ProtectedRoute><TaiKhoanPage /></ProtectedRoute>} />
+      <Route path="/linh-thach" element={<ProtectedRoute><TaiKhoanPage /></ProtectedRoute>} />
+      <Route path="/vi-xu" element={<ProtectedRoute><WalletPage /></ProtectedRoute>} />
+      <Route path="/lich-su" element={<ProtectedRoute><LichSuPage /></ProtectedRoute>} />
+      <Route path="/theo-doi" element={<ProtectedRoute><TuTruyenPage /></ProtectedRoute>} />
+      <Route path="/appeal/:reportId" element={<ProtectedRoute><AppealPage /></ProtectedRoute>} />
+
+      {/* Yêu cầu quyền Admin */}
+      <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>}>
         <Route index element={<DashboardTab />} />
         <Route path="users" element={<UsersTab />} />
         <Route path="comics" element={<ComicsTab />} />
         <Route path="chapters" element={<ChaptersTab />} />
+        <Route path="moderation" element={<ModerationTab />} />
         <Route path="comments" element={<CommentsTab />} />
         <Route path="reports" element={<ReportsTab />} />
         <Route path="reports/:id" element={<AdminReportDetailPage />} />
@@ -47,9 +61,7 @@ export default function App() {
         <Route path="transactions" element={<TransactionsTab />} />
         <Route path="withdrawals" element={<WithdrawalsTab />} />
       </Route>
-      <Route path="/lich-su" element={<LichSuPage />} />
-      <Route path="/theo-doi" element={<TuTruyenPage />} />
-      <Route path="/xep-hang" element={<XepHangPage />} />
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

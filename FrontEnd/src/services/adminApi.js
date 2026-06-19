@@ -26,6 +26,15 @@ export async function setUserStatusApi(userId, status) {
   }));
 }
 
+export async function setAdminRoleApi(userId, grant) {
+  return parseResponse(await fetch(`${API_BASE}/api/admin/users/${userId}/admin-role`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ grant }),
+  }));
+}
+
 export async function getAdminComicsApi(page = 0, size = 20, status = '') {
   const params = new URLSearchParams({ page, size, ...(status ? { status } : {}) });
   return parseResponse(await fetch(`${API_BASE}/api/admin/comics?${params}`, { credentials: 'include' }));
@@ -137,5 +146,33 @@ export async function setComicFeaturedApi(comicId, featured) {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ featured }),
+  }));
+}
+
+export async function getChapterContentAdminApi(chapterId) {
+  return parseResponse(await fetch(`${API_BASE}/api/admin/chapters/${chapterId}/content`, { credentials: 'include' }));
+}
+
+export async function getPendingChaptersAdminApi() {
+  return parseResponse(await fetch(`${API_BASE}/api/admin/chapters/pending`, { credentials: 'include' }));
+}
+
+export async function approveChapterApi(chapterId) {
+  return parseResponse(await fetch(`${API_BASE}/api/admin/chapters/${chapterId}/approve`, {
+    method: 'POST', credentials: 'include',
+  }));
+}
+
+export async function rejectChapterApi(chapterId, reason) {
+  return parseResponse(await fetch(`${API_BASE}/api/admin/chapters/${chapterId}/reject`, {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  }));
+}
+
+export async function recheckChapterApi(chapterId) {
+  return parseResponse(await fetch(`${API_BASE}/api/admin/chapters/${chapterId}/recheck`, {
+    method: 'POST', credentials: 'include',
   }));
 }

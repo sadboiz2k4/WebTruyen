@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faFlag, faPlay, faPause, faStop, faVolumeHigh } from '@fortawesome/free-solid-svg-icons';
+import { faGear, faFlag, faPlay, faPause, faStop, faVolumeHigh, faChevronUp } from '@fortawesome/free-solid-svg-icons';
 import { useTTS } from '../hooks/useTTS';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
@@ -76,6 +76,13 @@ export default function ComicReaderPage() {
   const [readBg, setReadBg] = useState(() => localStorage.getItem('read_bg') || 'white');
   const [readFont, setReadFont] = useState(() => localStorage.getItem('read_font') || 'default');
   const [ttsOpen, setTtsOpen] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 400);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   const sortedChapters = useMemo(() => {
     if (!comic?.chapters) return [];
@@ -537,9 +544,51 @@ export default function ComicReaderPage() {
                 <p>{chapter.title} · Chapter {chapter.chapterNo}</p>
                 <div className="reader-actions">
                   {!chapter.locked && !hasImagePages && (
-                    <button type="button" className="reader-settings-btn" onClick={() => setSettingsOpen((v) => !v)}>
-                      <FontAwesomeIcon icon={faGear} /> Cài đặt đọc
-                    </button>
+                    <div className="reader-settings-wrapper">
+                      <button type="button" className={`reader-settings-btn${settingsOpen ? ' active' : ''}`} onClick={() => setSettingsOpen((v) => !v)}>
+                        <FontAwesomeIcon icon={faGear} /> Cài đặt đọc
+                      </button>
+                      {settingsOpen && (
+                        <div className="reader-settings-panel">
+                          <div className="reader-settings-group">
+                            <span>Cỡ chữ</span>
+                            <div className="reader-settings-options">
+                              {[['small','Nhỏ'],['medium','Vừa'],['large','Lớn'],['xlarge','Rất lớn']].map(([v, label]) => (
+                                <button key={v} type="button"
+                                  className={`reader-settings-opt${readFontSize === v ? ' active' : ''}`}
+                                  onClick={() => { setReadFontSize(v); localStorage.setItem('read_font_size', v); }}>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="reader-settings-group">
+                            <span>Nền</span>
+                            <div className="reader-settings-options">
+                              {[['white','Trắng'],['sepia','Sepia'],['dark','Tối'],['black','Đen']].map(([v, label]) => (
+                                <button key={v} type="button"
+                                  className={`reader-settings-opt reader-settings-opt--bg-${v}${readBg === v ? ' active' : ''}`}
+                                  onClick={() => { setReadBg(v); localStorage.setItem('read_bg', v); }}>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="reader-settings-group">
+                            <span>Font chữ</span>
+                            <div className="reader-settings-options">
+                              {[['default','Mặc định'],['serif','Serif'],['mono','Monospace']].map(([v, label]) => (
+                                <button key={v} type="button"
+                                  className={`reader-settings-opt${readFont === v ? ' active' : ''}`}
+                                  onClick={() => { setReadFont(v); localStorage.setItem('read_font', v); }}>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                   {!chapter.locked && !hasImagePages && tts.isSupported && (
                     <button type="button" className="reader-settings-btn tts-toggle-btn" onClick={() => setTtsOpen((v) => !v)}>
@@ -550,47 +599,6 @@ export default function ComicReaderPage() {
                     <FontAwesomeIcon icon={faFlag} /> Báo cáo vi phạm
                   </button>
                 </div>
-
-                {settingsOpen && !hasImagePages && (
-                  <div className="reader-settings-panel">
-                    <div className="reader-settings-group">
-                      <span>Cỡ chữ</span>
-                      <div className="reader-settings-options">
-                        {[['small','Nhỏ'],['medium','Vừa'],['large','Lớn'],['xlarge','Rất lớn']].map(([v, label]) => (
-                          <button key={v} type="button"
-                            className={`reader-settings-opt${readFontSize === v ? ' active' : ''}`}
-                            onClick={() => { setReadFontSize(v); localStorage.setItem('read_font_size', v); }}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="reader-settings-group">
-                      <span>Nền</span>
-                      <div className="reader-settings-options">
-                        {[['white','Trắng'],['sepia','Sepia'],['dark','Tối'],['black','Đen']].map(([v, label]) => (
-                          <button key={v} type="button"
-                            className={`reader-settings-opt reader-settings-opt--bg-${v}${readBg === v ? ' active' : ''}`}
-                            onClick={() => { setReadBg(v); localStorage.setItem('read_bg', v); }}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="reader-settings-group">
-                      <span>Font chữ</span>
-                      <div className="reader-settings-options">
-                        {[['default','Mặc định'],['serif','Serif'],['mono','Monospace']].map(([v, label]) => (
-                          <button key={v} type="button"
-                            className={`reader-settings-opt${readFont === v ? ' active' : ''}`}
-                            onClick={() => { setReadFont(v); localStorage.setItem('read_font', v); }}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 {ttsOpen && !hasImagePages && tts.isSupported && (
                   <div className="tts-panel">
@@ -862,8 +870,6 @@ export default function ComicReaderPage() {
                     </button>
                   </div>
 
-                  <p className="text-reader-meta">Phiên bản dịch {wordCount} chữ</p>
-
                   <article
                     className={`text-reader-content text-reader-content--${readBg} text-reader-font--${readFont} text-reader-size--${readFontSize}`}
                   >
@@ -1050,6 +1056,17 @@ export default function ComicReaderPage() {
 
         <Footer />
       </div>
+
+      {showScrollTop && (
+        <button
+          type="button"
+          className="scroll-top-btn"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          title="Lên đầu trang"
+        >
+          <FontAwesomeIcon icon={faChevronUp} />
+        </button>
+      )}
     </div>
   );
 }

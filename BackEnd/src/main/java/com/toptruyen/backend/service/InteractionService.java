@@ -484,7 +484,7 @@ public class InteractionService {
             userId
         );
         if (existingActive != null && existingActive > 0) {
-            throw new IllegalArgumentException("Ban da bao cao binh luan nay roi");
+            throw new IllegalArgumentException("Bạn đã báo cáo bình luận này rồi");
         }
 
         jdbcTemplate.update(
@@ -790,7 +790,7 @@ public class InteractionService {
                 userId
         );
         if (existingActive != null && existingActive > 0) {
-            throw new IllegalArgumentException("Ban da bao cao noi dung nay roi");
+            throw new IllegalArgumentException("Bạn đã báo cáo nội dung này rồi");
         }
 
         jdbcTemplate.update(

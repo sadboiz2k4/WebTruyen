@@ -12,7 +12,10 @@ public class Role {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @Column(nullable = false, unique = true, length = 50)
+    @Column(nullable = false, unique = true, length = 30)
+    private String code;
+
+    @Column(nullable = false, length = 100)
     private String name;
     
     @Column(columnDefinition = "TEXT")
@@ -23,29 +26,39 @@ public class Role {
     
     public Role() {
     }
-    
-    public Role(String name) {
+
+    public Role(String code, String name) {
+        this.code = code;
         this.name = name;
     }
-    
-    public Role(String name, String description) {
+
+    public Role(String code, String name, String description) {
+        this.code = code;
         this.name = name;
         this.description = description;
     }
-    
+
     // Getters and Setters
     public Long getId() {
         return id;
     }
-    
+
     public void setId(Long id) {
         this.id = id;
     }
-    
+
+    public String getCode() {
+        return code;
+    }
+
+    public void setCode(String code) {
+        this.code = code;
+    }
+
     public String getName() {
         return name;
     }
-    
+
     public void setName(String name) {
         this.name = name;
     }

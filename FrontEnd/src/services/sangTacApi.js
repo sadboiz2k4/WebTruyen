@@ -1,4 +1,11 @@
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080';
+const AI_BASE = import.meta.env.VITE_AI_BASE || 'http://localhost:5000';
+
+export async function getAiHealthApi() {
+  const response = await fetch(`${AI_BASE}/health`, { signal: AbortSignal.timeout(3000) });
+  if (!response.ok) throw new Error('AI offline');
+  return response.json();
+}
 
 async function parseResponse(response) {
   const data = await response.json().catch(() => ({}));
@@ -178,6 +185,13 @@ export async function publishDraftChapterApi(mode, draftChapterId, scheduledAt) 
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ scheduledAt: scheduledAt || null }),
+  });
+  return parseResponse(response);
+}
+
+export async function getPendingChaptersApi() {
+  const response = await fetch(`${API_BASE}/api/author-workspace/chapters/pending`, {
+    credentials: 'include',
   });
   return parseResponse(response);
 }

@@ -35,8 +35,9 @@ public class PublicComicService {
                        (SELECT COALESCE(AVG(r.rating), 0.0) FROM comic_ratings r WHERE r.comic_id = pc.id) AS avg_rating
                 FROM published_comics pc
                 LEFT JOIN published_chapters ch ON ch.comic_id = pc.id
-                    AND ch.chapter_no = (SELECT MAX(chapter_no) FROM published_chapters WHERE comic_id = pc.id)
+                    AND ch.chapter_no = (SELECT MAX(chapter_no) FROM published_chapters WHERE comic_id = pc.id AND COALESCE(status,'PUBLISHED') = 'PUBLISHED')
                 WHERE pc.status = 'PUBLISHED'
+                AND EXISTS (SELECT 1 FROM published_chapters WHERE comic_id = pc.id AND COALESCE(status,'PUBLISHED') = 'PUBLISHED')
                 ORDER BY pc.published_at DESC
                 LIMIT ? OFFSET ?
                 """,
@@ -56,7 +57,7 @@ public class PublicComicService {
                 size, offset
         );
         Integer total = jdbcTemplate.queryForObject(
-                "SELECT COUNT(1) FROM published_comics WHERE status = 'PUBLISHED'",
+                "SELECT COUNT(1) FROM published_comics pc WHERE pc.status = 'PUBLISHED' AND EXISTS (SELECT 1 FROM published_chapters WHERE comic_id = pc.id AND COALESCE(status,'PUBLISHED') = 'PUBLISHED')",
                 Integer.class
         );
         int totalItems = total != null ? total : 0;
@@ -72,6 +73,7 @@ public class PublicComicService {
                 FROM published_comics pc
                 LEFT JOIN users u ON pc.user_id = u.id
                 WHERE pc.slug = ? AND pc.status = 'PUBLISHED'
+                AND EXISTS (SELECT 1 FROM published_chapters WHERE comic_id = pc.id AND COALESCE(status,'PUBLISHED') = 'PUBLISHED')
                 LIMIT 1
                 """,
                 (rs, rowNum) -> {
@@ -80,6 +82,7 @@ public class PublicComicService {
                             SELECT id, chapter_no, title, published_at, COALESCE(price, 0) AS price
                             FROM published_chapters
                             WHERE comic_id = ? AND published_at <= NOW()
+                            AND COALESCE(status, 'PUBLISHED') = 'PUBLISHED'
                             ORDER BY chapter_no ASC
                             """,
                             (crs, crow) -> new PublicChapterSummary(
@@ -289,6 +292,7 @@ public class PublicComicService {
 
         String baseWhere = """
                 WHERE pc.status = 'PUBLISHED'
+                  AND EXISTS (SELECT 1 FROM published_chapters WHERE comic_id = pc.id AND COALESCE(status, 'PUBLISHED') = 'PUBLISHED' AND published_at <= NOW())
                   AND (pc.title LIKE ? OR pc.description LIKE ? OR u.display_name LIKE ? OR pc.categories LIKE ?)
                 """
                 + (hasCategory   ? "  AND pc.categories LIKE ?\n" : "")
@@ -312,7 +316,7 @@ public class PublicComicService {
                        (SELECT COALESCE(SUM(view_count), 0) FROM published_chapters WHERE comic_id = pc.id) AS total_views
                 FROM published_comics pc
                 LEFT JOIN published_chapters ch ON ch.comic_id = pc.id
-                    AND ch.chapter_no = (SELECT MAX(chapter_no) FROM published_chapters WHERE comic_id = pc.id AND published_at <= NOW())
+                    AND ch.chapter_no = (SELECT MAX(chapter_no) FROM published_chapters WHERE comic_id = pc.id AND COALESCE(status, 'PUBLISHED') = 'PUBLISHED' AND published_at <= NOW())
                 LEFT JOIN users u ON pc.user_id = u.id
                 """ + baseWhere + orderBy + "LIMIT ? OFFSET ?",
                 (rs, rowNum) -> new SearchComicsResultItem(
@@ -415,9 +419,11 @@ public class PublicComicService {
                        u.display_name AS author_name
                 FROM published_comics pc
                 LEFT JOIN published_chapters ch ON ch.comic_id = pc.id
-                    AND ch.chapter_no = (SELECT MAX(chapter_no) FROM published_chapters WHERE comic_id = pc.id AND published_at <= NOW())
+                    AND ch.status = 'PUBLISHED'
+                    AND ch.chapter_no = (SELECT MAX(chapter_no) FROM published_chapters WHERE comic_id = pc.id AND status = 'PUBLISHED' AND published_at <= NOW())
                 LEFT JOIN users u ON pc.user_id = u.id
                 WHERE pc.status = 'PUBLISHED' AND u.display_name = ?
+                  AND EXISTS (SELECT 1 FROM published_chapters WHERE comic_id = pc.id AND status = 'PUBLISHED')
                 ORDER BY pc.published_at DESC
                 """,
                 (rs, rowNum) -> new SearchComicsResultItem(

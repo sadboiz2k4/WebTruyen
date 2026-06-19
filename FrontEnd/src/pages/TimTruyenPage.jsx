@@ -157,13 +157,6 @@ export default function TimTruyenPage() {
             <section className="timtruyen-content">
               <h1>Tất cả thể loại truyện tranh</h1>
 
-              <input
-                className="timtruyen-search"
-                placeholder="Tìm truyện..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-
               <div className="timtruyen-tabs">
                 {statusOptions.map((status) => (
                   <button

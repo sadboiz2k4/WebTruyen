@@ -7,6 +7,7 @@ public record PublishComicResponse(
         Long chapterId,
         Integer chapterNo,
         String slug,
-        String chapterTitle
+        String chapterTitle,
+        String chapterStatus
 ) {
 }

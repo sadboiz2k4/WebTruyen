@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faEye, faCommentDots, faStar, faHeart, faFire, faChartBar, faCalendarDay, faCalendarWeek, faCalendar, faBook, faTrophy, faPen } from '@fortawesome/free-solid-svg-icons';
+import { faEye, faCommentDots, faStar, faHeart, faFire, faChartBar, faCalendarDay, faCalendarWeek, faCalendar, faBook, faTrophy, faPen, faTag, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { searchComicsApi } from '../services/searchApi';
@@ -22,6 +22,14 @@ const RANK_TYPES = [
 const STATUS_MAP = {
   'truyen-full': 'Hoàn thành',
 };
+
+const CATEGORIES = [
+  'Action', 'Adventure', 'Anime', 'Chuyển Sinh', 'Comedy', 'Cổ Đại', 'Drama',
+  'Đam Mỹ', 'Fantasy', 'Historical', 'Horror', 'Manhua', 'Manhwa', 'Martial Arts',
+  'Mystery', 'Ngôn Tình', 'Psychological', 'Romance', 'School Life', 'Sci-fi',
+  'Shounen', 'Slice of Life', 'Sports', 'Supernatural', 'Tragedy', 'Tu Tiên',
+  'Webtoon', 'Xuyên Không',
+];
 
 const PAGE_SIZE = 20;
 
@@ -72,20 +80,23 @@ function RankCard({ item, rank }) {
 export default function XepHangPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeType = searchParams.get('type') || 'top-all';
+  const activeCategory = searchParams.get('category') || '';
 
   const [comics, setComics] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
+  const [showAllCategories, setShowAllCategories] = useState(false);
 
   const currentRank = RANK_TYPES.find((r) => r.value === activeType) || RANK_TYPES[0];
+  const visibleCategories = showAllCategories ? CATEGORIES : CATEGORIES.slice(0, 12);
 
   const fetchRanking = async (page = 0) => {
     setLoading(true);
     try {
       const status = STATUS_MAP[activeType] || '';
-      const data = await searchComicsApi('', '', status, currentRank.sort, 'all', page, PAGE_SIZE);
+      const data = await searchComicsApi('', activeCategory, status, currentRank.sort, 'all', page, PAGE_SIZE);
       setComics(data.data || []);
       setTotalPages(data.totalPages || 0);
       setTotalItems(data.totalItems || 0);
@@ -100,10 +111,18 @@ export default function XepHangPage() {
   useEffect(() => {
     setCurrentPage(0);
     fetchRanking(0);
-  }, [activeType]);
+  }, [activeType, activeCategory]);
 
   const handleTypeChange = (value) => {
-    setSearchParams({ type: value });
+    const params = { type: value };
+    if (activeCategory) params.category = activeCategory;
+    setSearchParams(params);
+  };
+
+  const handleCategoryChange = (cat) => {
+    const params = { type: activeType };
+    if (cat) params.category = cat;
+    setSearchParams(params);
   };
 
   const handlePageChange = (page) => {
@@ -112,6 +131,10 @@ export default function XepHangPage() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
+
+  const breadcrumbLabel = activeCategory
+    ? `${currentRank.label} · ${activeCategory}`
+    : currentRank.label;
 
   return (
     <div className="page xephang-page">
@@ -123,7 +146,7 @@ export default function XepHangPage() {
             <span>»</span>
             <span>Xếp hạng</span>
             <span>»</span>
-            <span>{currentRank.label}</span>
+            <span>{breadcrumbLabel}</span>
           </div>
 
           <div className="xephang-layout">
@@ -146,6 +169,38 @@ export default function XepHangPage() {
                   </li>
                 ))}
               </ul>
+
+              {/* Category filter */}
+              <div className="xephang-sidebar-title xephang-sidebar-title--category">
+                <FontAwesomeIcon icon={faTag} /> Theo thể loại
+              </div>
+              <div className="xephang-category-list">
+                <button
+                  type="button"
+                  className={`xephang-cat-btn${!activeCategory ? ' active' : ''}`}
+                  onClick={() => handleCategoryChange('')}
+                >
+                  Tất cả
+                </button>
+                {visibleCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    className={`xephang-cat-btn${activeCategory === cat ? ' active' : ''}`}
+                    onClick={() => handleCategoryChange(cat)}
+                  >
+                    {cat}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="xephang-cat-toggle"
+                  onClick={() => setShowAllCategories((v) => !v)}
+                >
+                  <FontAwesomeIcon icon={showAllCategories ? faChevronUp : faChevronDown} />
+                  {showAllCategories ? ' Thu gọn' : ' Xem thêm'}
+                </button>
+              </div>
             </aside>
 
             {/* Main content */}
@@ -153,6 +208,17 @@ export default function XepHangPage() {
               <div className="xephang-header">
                 <h1>
                   <FontAwesomeIcon icon={currentRank.icon} /> {currentRank.label}
+                  {activeCategory && (
+                    <span className="xephang-header-category">
+                      <FontAwesomeIcon icon={faTag} /> {activeCategory}
+                      <button
+                        type="button"
+                        className="xephang-header-category-clear"
+                        onClick={() => handleCategoryChange('')}
+                        title="Bỏ lọc thể loại"
+                      >×</button>
+                    </span>
+                  )}
                 </h1>
                 {totalItems > 0 && (
                   <span className="xephang-count">{totalItems.toLocaleString()} truyện</span>

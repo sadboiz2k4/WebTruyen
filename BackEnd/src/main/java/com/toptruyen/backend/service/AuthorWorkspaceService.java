@@ -22,10 +22,13 @@ public class AuthorWorkspaceService {
 
     private final JdbcTemplate jdbcTemplate;
     private final NotificationService notificationService;
+    private final ModerationService moderationService;
 
-    public AuthorWorkspaceService(JdbcTemplate jdbcTemplate, NotificationService notificationService) {
+    public AuthorWorkspaceService(JdbcTemplate jdbcTemplate, NotificationService notificationService,
+                                  ModerationService moderationService) {
         this.jdbcTemplate = jdbcTemplate;
         this.notificationService = notificationService;
+        this.moderationService = moderationService;
     }
 
     @PostConstruct
@@ -57,11 +60,15 @@ public class AuthorWorkspaceService {
         jdbcTemplate.execute("ALTER TABLE author_draft_chapters ADD COLUMN IF NOT EXISTS content LONGTEXT NULL");
         jdbcTemplate.execute("ALTER TABLE author_draft_chapters ADD COLUMN IF NOT EXISTS chapter_price BIGINT NOT NULL DEFAULT 0");
         jdbcTemplate.execute("ALTER TABLE author_draft_chapters ADD COLUMN IF NOT EXISTS target_chapter_id BIGINT NULL");
+        jdbcTemplate.execute("ALTER TABLE author_draft_chapters ADD COLUMN IF NOT EXISTS story_slug VARCHAR(255) NULL");
         jdbcTemplate.execute("ALTER TABLE author_draft_pages ADD COLUMN IF NOT EXISTS draft_chapter_id BIGINT NULL");
         jdbcTemplate.execute("ALTER TABLE published_comics ADD COLUMN IF NOT EXISTS story_status VARCHAR(32) NULL DEFAULT 'ONGOING'");
         jdbcTemplate.execute("ALTER TABLE published_comics ADD COLUMN IF NOT EXISTS categories VARCHAR(500) NULL");
         jdbcTemplate.execute("ALTER TABLE published_chapters ADD COLUMN IF NOT EXISTS view_count BIGINT NOT NULL DEFAULT 0");
         jdbcTemplate.execute("ALTER TABLE published_chapters ADD COLUMN IF NOT EXISTS price BIGINT NOT NULL DEFAULT 0");
+        jdbcTemplate.execute("ALTER TABLE published_chapters ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'PUBLISHED'");
+        jdbcTemplate.execute("ALTER TABLE published_chapters ADD COLUMN IF NOT EXISTS moderation_reason TEXT NULL");
+        jdbcTemplate.execute("ALTER TABLE published_chapters ADD COLUMN IF NOT EXISTS matched_chapter_id BIGINT NULL");
 
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS chapter_unlocks (
@@ -214,7 +221,7 @@ public class AuthorWorkspaceService {
             throw new IllegalArgumentException("Chua co ban nhap");
         }
 
-        List<AuthorDraftChapterItem> existing = getChapters(draft.id());
+        List<AuthorDraftChapterItem> existing = getChapters(draft.id(), draft.slug());
         String chapterTitle = (draft.chapterTitle() == null || draft.chapterTitle().isBlank())
                 ? defaultChapterTitle(mode, existing.size())
                 : draft.chapterTitle();
@@ -234,13 +241,14 @@ public class AuthorWorkspaceService {
         );
 
         jdbcTemplate.update("""
-                        INSERT INTO author_draft_chapters(draft_id, title, status, pages, sort_order, content, chapter_price, target_chapter_id)
-                        VALUES (?, ?, 'Nháp', ?, ?, ?, ?, ?)
+                        INSERT INTO author_draft_chapters(draft_id, title, status, pages, sort_order, content, chapter_price, target_chapter_id, story_slug)
+                        VALUES (?, ?, 'Nháp', ?, ?, ?, ?, ?, ?)
                         """,
                 draft.id(), chapterTitle, workspacePageCount, sortOrder,
                 draft.content(),
                 draft.chapterPrice() != null ? draft.chapterPrice() : 0L,
-                draft.targetChapterId()
+                draft.targetChapterId(),
+                draft.slug()
         );
 
         Long newChapterId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
@@ -340,6 +348,34 @@ public class AuthorWorkspaceService {
         String title = (draft.title() == null || draft.title().isBlank()) ? defaultTitle(mode) : draft.title();
         Long targetChapterId = reqTargetChapterId;
 
+        // ── Kiểm duyệt AI ────────────────────────────────────────────────────────
+        String chapterStatus = "PUBLISHED";
+        String moderationReason = null;
+        Long matchedChapterId = null;
+
+        if ("text".equals(mode) && reqContent != null && !reqContent.isBlank()) {
+            Long excludeForModeration = (reqTargetChapterId != null) ? findPublishedComicIdBySlug(slug) : null;
+            ModerationService.ModerationResult modResult = moderationService.moderate(reqContent, excludeForModeration);
+            switch (modResult.decision()) {
+                case REJECTED -> { chapterStatus = "REJECTED"; moderationReason = modResult.rejectReason(); matchedChapterId = modResult.matchedChapterId(); }
+                case PENDING_REVIEW -> { chapterStatus = "PENDING_REVIEW"; moderationReason = modResult.rejectReason(); matchedChapterId = modResult.matchedChapterId(); }
+                case AI_UNAVAILABLE -> { chapterStatus = "PENDING_REVIEW"; moderationReason = "Hệ thống AI tạm thời không khả dụng, chương cần xét duyệt thủ công."; }
+                default -> {}
+            }
+        } else if ("comic".equals(mode) && !reqPages.isEmpty()) {
+            List<String> imageUrls = reqPages.stream().map(p -> p.url()).filter(u -> u != null && !u.isBlank()).toList();
+            if (!imageUrls.isEmpty()) {
+                Long excludeForModeration = (reqTargetChapterId != null) ? findPublishedComicIdBySlug(slug) : null;
+                ModerationService.ModerationResult modResult = moderationService.moderateImages(imageUrls, excludeForModeration);
+                switch (modResult.decision()) {
+                    case REJECTED -> { chapterStatus = "REJECTED"; moderationReason = modResult.rejectReason(); matchedChapterId = modResult.matchedChapterId(); }
+                    case PENDING_REVIEW -> { chapterStatus = "PENDING_REVIEW"; moderationReason = modResult.rejectReason(); matchedChapterId = modResult.matchedChapterId(); }
+                    case AI_UNAVAILABLE -> { chapterStatus = "PENDING_REVIEW"; moderationReason = "Hệ thống AI tạm thời không khả dụng, chương cần xét duyệt thủ công."; }
+                    default -> {}
+                }
+            }
+        }
+
         Long comicId = findPublishedComicIdBySlug(slug);
         boolean isNewComic = (comicId == null);
         if (comicId == null) {
@@ -356,17 +392,31 @@ public class AuthorWorkspaceService {
             );
             comicId = findPublishedComicIdBySlug(slug);
         } else {
-            jdbcTemplate.update("""
-                            UPDATE published_comics
-                            SET title = ?, description = ?, cover_url = ?, status = 'PUBLISHED',
-                                updated_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                            """,
-                    title,
-                    draft.description(),
-                    draft.coverUrl(),
-                    comicId
-            );
+            if ("PUBLISHED".equals(chapterStatus)) {
+                jdbcTemplate.update("""
+                                UPDATE published_comics
+                                SET title = ?, description = ?, cover_url = ?, status = 'PUBLISHED',
+                                    updated_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP
+                                WHERE id = ?
+                                """,
+                        title,
+                        draft.description(),
+                        draft.coverUrl(),
+                        comicId
+                );
+            } else {
+                jdbcTemplate.update("""
+                                UPDATE published_comics
+                                SET title = ?, description = ?, cover_url = ?, status = 'PUBLISHED',
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = ?
+                                """,
+                        title,
+                        draft.description(),
+                        draft.coverUrl(),
+                        comicId
+                );
+            }
         }
 
         if (comicId == null) {
@@ -419,18 +469,18 @@ public class AuthorWorkspaceService {
             if (scheduledTs != null) {
                 jdbcTemplate.update("""
                                 UPDATE published_chapters
-                                SET title = ?, content = ?, price = ?, published_at = ?
+                                SET title = ?, content = ?, price = ?, published_at = ?, status = ?, moderation_reason = ?, matched_chapter_id = ?
                                 WHERE id = ?
                                 """,
-                        chapterTitle, reqContent, reqChapterPrice, scheduledTs, targetChapter.id()
+                        chapterTitle, reqContent, reqChapterPrice, scheduledTs, chapterStatus, moderationReason, matchedChapterId, targetChapter.id()
                 );
             } else {
                 jdbcTemplate.update("""
                                 UPDATE published_chapters
-                                SET title = ?, content = ?, price = ?, published_at = CURRENT_TIMESTAMP
+                                SET title = ?, content = ?, price = ?, published_at = CURRENT_TIMESTAMP, status = ?, moderation_reason = ?, matched_chapter_id = ?
                                 WHERE id = ?
                                 """,
-                        chapterTitle, reqContent, reqChapterPrice, targetChapter.id()
+                        chapterTitle, reqContent, reqChapterPrice, chapterStatus, moderationReason, matchedChapterId, targetChapter.id()
                 );
             }
             chapterId = targetChapter.id();
@@ -440,17 +490,17 @@ public class AuthorWorkspaceService {
         } else {
             if (scheduledTs != null) {
                 jdbcTemplate.update("""
-                                INSERT INTO published_chapters(comic_id, chapter_no, title, content, price, published_at)
-                                VALUES (?, ?, ?, ?, ?, ?)
+                                INSERT INTO published_chapters(comic_id, chapter_no, title, content, price, published_at, status, moderation_reason, matched_chapter_id)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
-                        comicId, chapterNo, chapterTitle, reqContent, reqChapterPrice, scheduledTs
+                        comicId, chapterNo, chapterTitle, reqContent, reqChapterPrice, scheduledTs, chapterStatus, moderationReason, matchedChapterId
                 );
             } else {
                 jdbcTemplate.update("""
-                                INSERT INTO published_chapters(comic_id, chapter_no, title, content, price, published_at)
-                                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                                INSERT INTO published_chapters(comic_id, chapter_no, title, content, price, published_at, status, moderation_reason, matched_chapter_id)
+                                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
                                 """,
-                        comicId, chapterNo, chapterTitle, reqContent, reqChapterPrice
+                        comicId, chapterNo, chapterTitle, reqContent, reqChapterPrice, chapterStatus, moderationReason, matchedChapterId
                 );
             }
 
@@ -509,22 +559,74 @@ public class AuthorWorkspaceService {
             }
         }
 
+        // Index chương vừa xuất bản vào kho AI để so sánh reup về sau
+        if ("text".equals(mode) && reqContent != null && !reqContent.isBlank() && "PUBLISHED".equals(chapterStatus)) {
+            final Long finalComicId = comicId;
+            final Long finalChapterId = chapterId;
+            final String finalTitle = title + " — " + chapterTitle;  // "Tên truyện — Tên chương"
+            final String finalContent = reqContent;
+            new Thread(() -> moderationService.indexChapter(finalComicId, finalChapterId, finalTitle, finalContent)).start();
+        } else if ("comic".equals(mode) && !reqPages.isEmpty() && "PUBLISHED".equals(chapterStatus)) {
+            final Long finalComicId = comicId;
+            final Long finalChapterId = chapterId;
+            final String finalTitle = title + " — " + chapterTitle;  // "Tên truyện — Tên chương"
+            final List<String> finalUrls = reqPages.stream().map(p -> p.url()).filter(u -> u != null && !u.isBlank()).toList();
+            new Thread(() -> moderationService.indexImageChapter(finalComicId, finalChapterId, finalTitle, finalUrls)).start();
+        }
+
+        String responseMessage;
+        if ("REJECTED".equals(chapterStatus)) {
+            responseMessage = "REJECTED";
+            try {
+                notificationService.createNotification(
+                    userId, "MODERATION",
+                    "Chương bị từ chối tự động",
+                    "\"" + chapterTitle + "\" bị từ chối. Lý do: " + moderationReason,
+                    chapterId, "/sang-tac?view=manage"
+                );
+            } catch (Exception ignored) {}
+        } else if ("PENDING_REVIEW".equals(chapterStatus)) {
+            responseMessage = "PENDING_REVIEW";
+            try {
+                notificationService.createNotification(
+                    userId, "MODERATION",
+                    "Chương đang chờ xét duyệt",
+                    "\"" + chapterTitle + "\" cần xét duyệt thủ công. Lý do: " + moderationReason,
+                    chapterId, "/sang-tac?view=manage"
+                );
+            } catch (Exception ignored) {}
+        } else {
+            responseMessage = "Dang truyen thanh cong";
+        }
+
         return new PublishComicResponse(
                 true,
-                "Dang truyen thanh cong",
+                responseMessage,
                 comicId,
                 chapterId,
                 chapterNo,
                 slug,
-                chapterTitle
+                chapterTitle,
+                chapterStatus
         );
+    }
+
+    public List<java.util.Map<String, Object>> getPendingChapters(Long userId) {
+        return jdbcTemplate.queryForList("""
+                SELECT pc.id, pc.chapter_no, pc.title, pc.moderation_reason,
+                       pc.status, pc.published_at, pco.title AS comic_title, pco.slug AS comic_slug
+                FROM published_chapters pc
+                JOIN published_comics pco ON pc.comic_id = pco.id
+                WHERE pco.user_id = ? AND pc.status IN ('PENDING_REVIEW', 'REJECTED')
+                ORDER BY pc.published_at DESC
+                """, userId);
     }
 
     public List<AuthorComicItem> getMyComics(Long userId) {
         return jdbcTemplate.query("""
                         SELECT pc.id, pc.slug, pc.title, pc.cover_url, pc.mode, pc.published_at, pc.story_status, pc.description,
                                pc.categories,
-                               (SELECT COUNT(*) FROM published_chapters ch WHERE ch.comic_id = pc.id) AS chapter_count
+                               (SELECT COUNT(*) FROM published_chapters ch WHERE ch.comic_id = pc.id AND ch.status = 'PUBLISHED') AS chapter_count
                         FROM published_comics pc
                         WHERE pc.user_id = ? AND pc.status = 'PUBLISHED'
                         ORDER BY pc.published_at DESC
@@ -669,7 +771,48 @@ public class AuthorWorkspaceService {
         if (ids.isEmpty()) {
             throw new IllegalArgumentException("Truyen khong ton tai hoac khong co quyen xoa");
         }
-        jdbcTemplate.update("DELETE FROM published_comics WHERE slug = ? AND user_id = ?", slug, userId);
+        Long comicId = ids.get(0);
+
+        // Lấy danh sách chapter để xóa dữ liệu liên quan
+        List<Long> chapterIds = jdbcTemplate.queryForList(
+                "SELECT id FROM published_chapters WHERE comic_id = ?", Long.class, comicId);
+
+        if (!chapterIds.isEmpty()) {
+            String chapterIn = chapterIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+            jdbcTemplate.update("DELETE FROM comment_replies WHERE parent_comment_id IN (SELECT id FROM chapter_comments WHERE chapter_id IN (" + chapterIn + "))");
+            jdbcTemplate.update("DELETE FROM comment_reports WHERE comment_id IN (SELECT id FROM chapter_comments WHERE chapter_id IN (" + chapterIn + "))");
+            jdbcTemplate.update("DELETE FROM chapter_comments WHERE chapter_id IN (" + chapterIn + ")");
+            jdbcTemplate.update("DELETE FROM chapter_unlocks WHERE chapter_id IN (" + chapterIn + ")");
+            jdbcTemplate.update("DELETE FROM published_chapter_pages WHERE chapter_id IN (" + chapterIn + ")");
+            jdbcTemplate.update("DELETE FROM chapter_embeddings WHERE chapter_id IN (" + chapterIn + ")");
+            jdbcTemplate.update("DELETE FROM published_read_history WHERE chapter_id IN (" + chapterIn + ")");
+            jdbcTemplate.update("DELETE FROM page_phashes WHERE chapter_id IN (" + chapterIn + ")");
+        }
+        jdbcTemplate.update("DELETE FROM published_chapters WHERE comic_id = ?", comicId);
+
+        // Xóa dữ liệu liên quan đến truyện
+        List<Long> comicCommentIds = jdbcTemplate.queryForList(
+                "SELECT id FROM comic_comments WHERE comic_id = ?", Long.class, comicId);
+        if (!comicCommentIds.isEmpty()) {
+            String ccIn = comicCommentIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+            jdbcTemplate.update("DELETE FROM comic_comment_replies WHERE parent_comment_id IN (" + ccIn + ")");
+        }
+        jdbcTemplate.update("DELETE FROM comic_comments WHERE comic_id = ?", comicId);
+        jdbcTemplate.update("DELETE FROM comic_ratings WHERE comic_id = ?", comicId);
+        jdbcTemplate.update("DELETE FROM published_follows WHERE comic_id = ?", comicId);
+        jdbcTemplate.update("DELETE FROM published_read_history WHERE comic_id = ?", comicId);
+        jdbcTemplate.update("DELETE FROM page_phashes WHERE comic_id = ?", comicId);
+        jdbcTemplate.update("DELETE FROM chapter_embeddings WHERE comic_id = ?", comicId);
+
+        jdbcTemplate.update("DELETE FROM published_comics WHERE id = ?", comicId);
+
+        // Xóa luôn bản nháp tương ứng để không hiện lại trong danh sách
+        jdbcTemplate.queryForList(
+                "SELECT id FROM author_drafts WHERE user_id = ? AND slug = ? LIMIT 1",
+                Long.class, userId, slug
+        ).forEach(draftId ->
+                jdbcTemplate.update("DELETE FROM author_drafts WHERE id = ?", draftId)
+        );
     }
 
     public void updateStoryStatus(Long userId, String slug, String storyStatus) {
@@ -693,6 +836,14 @@ public class AuthorWorkspaceService {
             throw new IllegalArgumentException("Chapter khong ton tai hoac khong co quyen xoa");
         }
 
+        jdbcTemplate.update("DELETE FROM published_chapter_pages WHERE chapter_id = ?", chapterId);
+        jdbcTemplate.update("DELETE FROM chapter_unlocks WHERE chapter_id = ?", chapterId);
+        jdbcTemplate.update("DELETE FROM comment_replies WHERE parent_comment_id IN (SELECT id FROM chapter_comments WHERE chapter_id = ?)", chapterId);
+        jdbcTemplate.update("DELETE FROM comment_reports WHERE comment_id IN (SELECT id FROM chapter_comments WHERE chapter_id = ?)", chapterId);
+        jdbcTemplate.update("DELETE FROM chapter_comments WHERE chapter_id = ?", chapterId);
+        jdbcTemplate.update("DELETE FROM chapter_embeddings WHERE chapter_id = ?", chapterId);
+        jdbcTemplate.update("DELETE FROM published_read_history WHERE chapter_id = ?", chapterId);
+        jdbcTemplate.update("DELETE FROM page_phashes WHERE chapter_id = ?", chapterId);
         jdbcTemplate.update("DELETE FROM published_chapters WHERE id = ?", chapterId);
         jdbcTemplate.update(
                 "UPDATE author_drafts SET target_chapter_id = NULL WHERE user_id = ? AND target_chapter_id = ?",
@@ -742,12 +893,19 @@ public class AuthorWorkspaceService {
                 userId, comicId
         );
 
-        long totalRevenue = items.stream()
+        long chapterRevenue = items.stream()
                 .mapToLong(item -> ((Number) item.get("chapterRevenue")).longValue())
                 .sum();
 
+        Long donateRevenue = jdbcTemplate.queryForObject(
+            "SELECT COALESCE(SUM(amount), 0) FROM wallet_transactions WHERE user_id = ? AND reason = CONCAT('Thu nhập donate #', ?)",
+            Long.class, userId, comicId);
+        if (donateRevenue == null) donateRevenue = 0L;
+
         java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
-        result.put("totalRevenue", totalRevenue);
+        result.put("totalRevenue", chapterRevenue + donateRevenue);
+        result.put("chapterRevenue", chapterRevenue);
+        result.put("donateRevenue", donateRevenue);
         result.put("items", items);
         return result;
     }
@@ -817,6 +975,46 @@ public class AuthorWorkspaceService {
             comic.put("comicRevenue", ((Number) comic.get("comicRevenue")).longValue() + chapterRevenue);
         }
 
+        // Merge donate revenue per comic
+        List<java.util.Map<String, Object>> donateRows = jdbcTemplate.query("""
+                SELECT
+                    pc.id AS comic_id,
+                    pc.slug AS slug,
+                    pc.title AS comic_title,
+                    COALESCE(SUM(wt.amount), 0) AS donate_revenue
+                FROM wallet_transactions wt
+                JOIN published_comics pc ON pc.id = CAST(REPLACE(wt.reason, 'Thu nhập donate #', '') AS UNSIGNED)
+                WHERE wt.user_id = ? AND wt.reason LIKE 'Thu nhập donate #%'
+                GROUP BY pc.id, pc.slug, pc.title
+                """,
+                (rs, rowNum) -> {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("comicId", rs.getLong("comic_id"));
+                    row.put("slug", rs.getString("slug"));
+                    row.put("comicTitle", rs.getString("comic_title"));
+                    row.put("donateRevenue", rs.getLong("donate_revenue"));
+                    return row;
+                },
+                userId);
+
+        for (java.util.Map<String, Object> dr : donateRows) {
+            Long cid = ((Number) dr.get("comicId")).longValue();
+            long dRev = ((Number) dr.get("donateRevenue")).longValue();
+            comicMap.computeIfAbsent(cid, id -> {
+                java.util.Map<String, Object> c = new java.util.LinkedHashMap<>();
+                c.put("comicId", id);
+                c.put("slug", dr.get("slug"));
+                c.put("comicTitle", dr.get("comicTitle"));
+                c.put("comicRevenue", 0L);
+                c.put("donateRevenue", 0L);
+                c.put("chapters", new java.util.ArrayList<>());
+                return c;
+            });
+            java.util.Map<String, Object> comic = comicMap.get(cid);
+            comic.put("donateRevenue", ((Number) comic.getOrDefault("donateRevenue", 0L)).longValue() + dRev);
+            comic.put("comicRevenue", ((Number) comic.get("comicRevenue")).longValue() + dRev);
+        }
+
         long totalRevenue = comicMap.values().stream()
                 .mapToLong(c -> ((Number) c.get("comicRevenue")).longValue())
                 .sum();
@@ -837,7 +1035,7 @@ public class AuthorWorkspaceService {
                     DATE_FORMAT(wt.created_at, '%Y-%m') AS month,
                     COALESCE(SUM(wt.amount), 0) AS revenue
                 FROM wallet_transactions wt
-                WHERE wt.user_id = ? AND wt.reason LIKE 'Thu nhập chapter #%'
+                WHERE wt.user_id = ? AND (wt.reason LIKE 'Thu nhập chapter #%' OR wt.reason LIKE 'Thu nhập donate #%')
                     AND wt.created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
                 GROUP BY DATE_FORMAT(wt.created_at, '%Y-%m')
                 ORDER BY month ASC
@@ -923,12 +1121,12 @@ public class AuthorWorkspaceService {
         return draft;
     }
 
-    private List<AuthorDraftChapterItem> getChapters(Long draftId) {
+    private List<AuthorDraftChapterItem> getChapters(Long draftId, String storySlug) {
         List<AuthorDraftChapterItem> chapters = jdbcTemplate.query("""
                         SELECT id, title, status, pages, sort_order,
                                content, COALESCE(chapter_price, 0) AS chapter_price, target_chapter_id
                         FROM author_draft_chapters
-                        WHERE draft_id = ?
+                        WHERE draft_id = ? AND (story_slug = ? OR (story_slug IS NULL AND ? IS NULL))
                         ORDER BY sort_order ASC, id ASC
                         """,
                 (rs, rowNum) -> new AuthorDraftChapterItem(
@@ -942,7 +1140,7 @@ public class AuthorWorkspaceService {
                         (Long) rs.getObject("target_chapter_id"),
                         null
                 ),
-                draftId
+                draftId, storySlug, storySlug
         );
         return chapters.stream().map(ch ->
                 new AuthorDraftChapterItem(
@@ -1060,7 +1258,7 @@ public class AuthorWorkspaceService {
     }
 
     private AuthorDraftResponse toResponse(DraftRow draft) {
-        List<AuthorDraftChapterItem> chapters = getChapters(draft.id());
+        List<AuthorDraftChapterItem> chapters = getChapters(draft.id(), draft.slug());
         List<AuthorDraftPageItem> pages = getDraftPages(draft.id());
 
         return new AuthorDraftResponse(
@@ -1094,7 +1292,9 @@ public class AuthorWorkspaceService {
     }
 
     private String normalizeSlug(String slug, String mode) {
-        return slug == null ? defaultSlug(mode) : slug;
+        if (slug == null) return defaultSlug(mode);
+        // Giới hạn slug tối đa 200 ký tự để tránh vượt VARCHAR(255)
+        return slug.length() > 200 ? slug.substring(0, 200) : slug;
     }
 
     private String defaultTitle(String mode) {

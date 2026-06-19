@@ -181,6 +181,8 @@ public class AuthorWorkspaceController {
             return ResponseEntity.ok(Map.of("success", true, "slug", slug));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("message", "Loi xoa truyen: " + e.getMessage()));
         }
     }
 
@@ -271,6 +273,13 @@ public class AuthorWorkspaceController {
         }
     }
 
+    @GetMapping("/chapters/pending")
+    public ResponseEntity<?> getPendingChapters(HttpSession session) {
+        Object userId = session.getAttribute(SESSION_USER_ID);
+        if (userId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Chua dang nhap"));
+        return ResponseEntity.ok(authorWorkspaceService.getPendingChapters(((Number) userId).longValue()));
+    }
+
     @DeleteMapping("/chapters/{chapterId}")
     public ResponseEntity<?> deleteChapter(@PathVariable Long chapterId, HttpSession session) {
         Object userId = session.getAttribute(SESSION_USER_ID);
@@ -284,6 +293,8 @@ public class AuthorWorkspaceController {
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("message", "Loi xoa chapter: " + e.getMessage()));
         }
     }
 }

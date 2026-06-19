@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBell, faBook, faCommentDots, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
@@ -9,6 +9,7 @@ const TYPE_ICONS = {
   NEW_COMIC: faStar,
   NEW_CHAPTER: faBook,
   FOLLOW_COMIC: faHeart,
+  DONATE: faHeart,
   COMMENT_REPLY: faCommentDots,
   COMMENT_ON_CHAPTER: faCommentDots,
   REPORT: faExclamationTriangle,
@@ -21,13 +22,26 @@ export default function NotificationsDropdown() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
   const navigate = useNavigate();
+  const menuRef = useRef(null);
 
   useEffect(() => {
     getUnreadCountApi()
       .then((data) => setUnreadCount(data?.unreadCount ?? data ?? 0))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
@@ -56,9 +70,7 @@ export default function NotificationsDropdown() {
           prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
         );
         setUnreadCount((c) => Math.max(0, c - 1));
-      } catch (error) {
-        console.error('Failed to mark notification as read:', error);
-      }
+      } catch (error) {}
     }
     if (notif.type === 'REPORT') {
       setIsOpen(false);
@@ -66,6 +78,9 @@ export default function NotificationsDropdown() {
     } else if (notif.relatedUrl) {
       setIsOpen(false);
       navigate(notif.relatedUrl);
+    } else {
+      // Không có URL → toggle expand để đọc full message
+      setExpandedId((prev) => (prev === notif.id ? null : notif.id));
     }
   };
 
@@ -80,7 +95,7 @@ export default function NotificationsDropdown() {
   };
 
   return (
-    <div className="notifications-menu">
+    <div className="notifications-menu" ref={menuRef}>
       <button
         className="notifications-trigger"
         onClick={() => setIsOpen(!isOpen)}
@@ -121,11 +136,19 @@ export default function NotificationsDropdown() {
                   </div>
                   <div className="notification-content">
                     <div className="notification-title">{notif.title}</div>
-                    <div className="notification-message">
+                    <div
+                      className="notification-message"
+                      style={expandedId === notif.id ? { WebkitLineClamp: 'unset', overflow: 'visible', display: 'block' } : {}}
+                    >
                       {notif.message && notif.message.split('\n').map((line, i) => (
                         <div key={i}>{line}</div>
                       ))}
                     </div>
+                    {!notif.relatedUrl && notif.type !== 'REPORT' && (
+                      <div style={{ fontSize: 11, color: '#1976d2', marginTop: 2 }}>
+                        {expandedId === notif.id ? '▲ Thu gọn' : '▼ Xem thêm'}
+                      </div>
+                    )}
                     <div className="notification-time">{notif.createdAt}</div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>

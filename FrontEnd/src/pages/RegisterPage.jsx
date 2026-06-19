@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { GoogleLogin } from '@react-oauth/google';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
-import { registerApi } from '../services/authApi';
+import { googleLoginApi, registerApi } from '../services/authApi';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -50,7 +51,7 @@ export default function RegisterPage() {
           <section className="login-panel">
             <h1>ĐĂNG KÝ</h1>
             <form className="login-form" onSubmit={handleSubmit}>
-              <label htmlFor="name">Name</label>
+              <label htmlFor="name">Tên hiển thị</label>
               <input
                 id="name"
                 type="text"
@@ -104,10 +105,26 @@ export default function RegisterPage() {
                 {loading ? 'Dang xu ly...' : 'Đăng ký'}
               </button>
 
-              <button className="btn-google" type="button">
-                <span>G</span>
-                Đăng ký bằng tài khoản Google
-              </button>
+              <div className="btn-google-wrap">
+                <GoogleLogin
+                  onSuccess={async (credentialResponse) => {
+                    try {
+                      await googleLoginApi(credentialResponse.credential);
+                      window.setTimeout(() => navigate('/'), 300);
+                    } catch (error) {
+                      setMessage(error.message || 'Đăng ký Google thất bại');
+                      setMessageType('error');
+                    }
+                  }}
+                  onError={() => {
+                    setMessage('Đăng ký Google thất bại');
+                    setMessageType('error');
+                  }}
+                  text="signup_with"
+                  shape="rectangular"
+                  width="100%"
+                />
+              </div>
             </form>
           </section>
         </main>
