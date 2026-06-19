@@ -10,8 +10,11 @@ import com.toptruyen.backend.entity.UserWallet;
 import com.toptruyen.backend.repository.UserRepository;
 import com.toptruyen.backend.repository.UserWalletRepository;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,8 +37,17 @@ public class AuthService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Autowired(required = false)
+    private JavaMailSender mailSender;
+
     @Value("${app.google.client-id:}")
     private String googleClientId;
+
+    @Value("${vnpay.frontend-url:http://localhost:5173}")
+    private String frontendUrl;
+
+    @Value("${spring.mail.username:}")
+    private String mailUsername;
 
     public AuthService(
             UserRepository userRepository,
@@ -53,6 +65,64 @@ public class AuthService {
     public void initColumns() {
         jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) NULL");
         jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(50) NULL");
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                token VARCHAR(255) NOT NULL UNIQUE,
+                expires_at DATETIME NOT NULL,
+                used TINYINT(1) NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """);
+    }
+
+    public void requestPasswordReset(String email) {
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null) return;
+
+        String token = UUID.randomUUID().toString();
+        LocalDateTime expiresAt = LocalDateTime.now().plusHours(1);
+
+        jdbcTemplate.update("DELETE FROM password_reset_tokens WHERE user_id = ?", user.getId());
+        jdbcTemplate.update(
+            "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
+            user.getId(), token, expiresAt
+        );
+
+        if (mailSender == null) {
+            throw new IllegalStateException("Dịch vụ email chưa được cấu hình");
+        }
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(mailUsername);
+        message.setTo(email);
+        message.setSubject("[TopTruyen] Đặt lại mật khẩu");
+        message.setText(
+            "Xin chào " + user.getDisplayName() + ",\n\n" +
+            "Nhấn vào đường dẫn sau để đặt lại mật khẩu (hiệu lực 1 giờ):\n\n" +
+            frontendUrl + "/reset-password?token=" + token + "\n\n" +
+            "Nếu bạn không yêu cầu, hãy bỏ qua email này.\n\n" +
+            "TopTruyen"
+        );
+        mailSender.send(message);
+    }
+
+    @Transactional
+    public void resetPassword(String token, String newPassword) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT user_id FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > NOW()",
+            token
+        );
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn");
+        }
+        Long userId = ((Number) rows.get(0).get("user_id")).longValue();
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new IllegalArgumentException("Người dùng không tồn tại"));
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+        jdbcTemplate.update("UPDATE password_reset_tokens SET used = 1 WHERE token = ?", token);
     }
 
     public UserAuthRow findByEmail(String email) {

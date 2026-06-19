@@ -181,6 +181,8 @@ public class AuthorWorkspaceController {
             return ResponseEntity.ok(Map.of("success", true, "slug", slug));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("message", "Loi xoa truyen: " + e.getMessage()));
         }
     }
 
@@ -291,6 +293,8 @@ public class AuthorWorkspaceController {
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("message", "Loi xoa chapter: " + e.getMessage()));
         }
     }
 }

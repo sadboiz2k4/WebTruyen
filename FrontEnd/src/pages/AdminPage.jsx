@@ -979,7 +979,7 @@ function ReportsTab() {
                         <div style={{ maxHeight: 220, overflow: 'auto', borderTop: '1px solid var(--line)', paddingTop: 8 }}>
                           {(detailData.auditLogs || []).map((l, i) => (
                             <div key={i} style={{ padding: '6px 0', borderBottom: '1px dashed var(--line)' }}>
-                              <div style={{ fontSize: 13 }}><strong>{l.action}</strong> — <span style={{ color: 'var(--text-sub)' }}>bởi {l.actor_user_id || l.actorUserId}</span></div>
+                              <div style={{ fontSize: 13 }}><strong>{l.action}</strong> — <span style={{ color: 'var(--text-sub)' }}>bởi {l.actor_display_name || l.actorDisplayName || l.actor_user_id || l.actorUserId}</span></div>
                               <div style={{ fontSize: 12, color: 'var(--text-sub)' }}>{l.ts || l.created_at} {l.note ? `· ${l.note}` : ''}</div>
                             </div>
                           ))}
@@ -1057,17 +1057,34 @@ function AppealsTab() {
   const [detailOpenA, setDetailOpenA] = useState(false);
   const [detailLoadingA, setDetailLoadingA] = useState(false);
   const [detailDataA, setDetailDataA] = useState(null);
+  const [selectedAppeal, setSelectedAppeal] = useState(null);
+  const [adminNoteInput, setAdminNoteInput] = useState('');
+  const [resolving, setResolving] = useState(false);
 
-  const openDetailA = async (id, scope = 'CONTENT') => {
+  const openDetailA = async (appeal) => {
+    setSelectedAppeal(appeal);
+    setAdminNoteInput('');
     setDetailOpenA(true);
     setDetailLoadingA(true);
     try {
-      const d = await getAdminReportDetailApi(id, scope);
+      const d = await getAdminReportDetailApi(appeal.reportId, appeal.reportScope || 'CONTENT');
       setDetailDataA(d);
     } catch (e) { setDetailDataA({ error: e.message }); }
     finally { setDetailLoadingA(false); }
   };
-  const closeDetailA = () => { setDetailOpenA(false); setDetailDataA(null); };
+  const closeDetailA = () => { setDetailOpenA(false); setDetailDataA(null); setSelectedAppeal(null); setAdminNoteInput(''); };
+
+  const resolveFromModal = async (newStatus) => {
+    if (!selectedAppeal) return;
+    setResolving(true);
+    try {
+      await resolveAppealApi(selectedAppeal.id, newStatus, adminNoteInput);
+      setActionMsg(`Đã ${newStatus === 'APPROVED' ? 'chấp nhận' : 'từ chối'} kháng nghị`);
+      closeDetailA();
+      await load(page, filterStatus);
+    } catch (e) { setActionMsg(e.message); }
+    finally { setResolving(false); }
+  };
 
   return (
     <div className="admin-tab-content">
@@ -1120,7 +1137,7 @@ function AppealsTab() {
                     </td>
                     <td className="admin-actions-cell">
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <button type="button" className="admin-btn admin-btn--sm" onClick={() => { console.log('[Admin][AppealsTab] open detail clicked', { reportId: a.reportId }); navigate(`/admin/reports/${a.reportId}`); }}>Chi tiết</button>
+                        <button type="button" className="admin-btn admin-btn--sm" onClick={() => openDetailA(a)}>Chi tiết</button>
                         {Array.isArray(a.allowedActions) && a.allowedActions.length > 0 ? (
                           <div style={{ display: 'flex', gap: 4 }}>
                             {a.allowedActions.map((act) => (
@@ -1152,6 +1169,77 @@ function AppealsTab() {
               <button type="button" disabled={page === 0} onClick={() => load(page - 1, filterStatus)}>‹</button>
               <span>{page + 1} / {totalPages}</span>
               <button type="button" disabled={page >= totalPages - 1} onClick={() => load(page + 1, filterStatus)}>›</button>
+            </div>
+          )}
+          {detailOpenA && (
+            <div className="admin-modal-backdrop" onClick={closeDetailA}>
+              <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <h3>Chi tiết kháng nghị (Báo cáo #{selectedAppeal?.reportId})</h3>
+                  <button className="admin-btn admin-btn--sm" onClick={closeDetailA}>Đóng</button>
+                </div>
+                <div className="admin-modal-body">
+                  {detailLoadingA ? <div>Đang tải...</div> : (
+                    detailDataA?.error ? <div style={{ color: 'red' }}>{detailDataA.error}</div> : (
+                      <div>
+                        <p><strong>Người báo cáo:</strong> {detailDataA?.reporter_name || detailDataA?.reporterId}</p>
+                        <p><strong>Loại nội dung:</strong> {getTypeLabel(detailDataA?.target_type || detailDataA?.targetType)}</p>
+                        <p><strong>Nội dung bị báo cáo:</strong> {detailDataA?.target_title || detailDataA?.targetTitle || detailDataA?.target_slug}</p>
+                        <p><strong>Lý do báo cáo:</strong> {detailDataA?.reason}</p>
+                        <p><strong>Trạng thái báo cáo:</strong> {getStatusLabel(detailDataA?.status)}</p>
+                        <h4 style={{ margin: '12px 0 6px' }}>Nội dung kháng nghị</h4>
+                        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '12px 16px', marginBottom: 12, fontSize: 14, lineHeight: 1.6 }}>
+                          {selectedAppeal?.message || '—'}
+                        </div>
+                        <h4 style={{ margin: '16px 0 6px' }}>Ghi chú gửi cho tác giả</h4>
+                        <textarea
+                          rows={3}
+                          placeholder="Nhập lý do chấp nhận hoặc từ chối kháng nghị (tùy chọn)..."
+                          value={adminNoteInput}
+                          onChange={(e) => setAdminNoteInput(e.target.value)}
+                          style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line)', padding: '10px 12px', fontSize: 13, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                        />
+                        {selectedAppeal?.adminNote && (
+                          <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Ghi chú cũ: {selectedAppeal.adminNote}</p>
+                        )}
+                        {Array.isArray(selectedAppeal?.allowedActions) && selectedAppeal.allowedActions.length > 0 && (
+                          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                            {selectedAppeal.allowedActions.map((act) => (
+                              <button
+                                key={act}
+                                type="button"
+                                disabled={resolving}
+                                className={`admin-btn ${act === 'APPROVED' ? 'admin-btn--success' : 'admin-btn--danger'}`}
+                                onClick={() => resolveFromModal(act)}
+                              >
+                                {resolving ? 'Đang xử lý...' : act === 'APPROVED' ? 'Chấp nhận kháng nghị' : 'Từ chối kháng nghị'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <h4 style={{ margin: '16px 0 6px' }}>Lịch sử xử lý</h4>
+                        <div style={{ maxHeight: 200, overflow: 'auto', borderTop: '1px solid var(--line)', paddingTop: 8 }}>
+                          {(detailDataA?.auditLogs || []).map((l, i) => (
+                            <div key={i} style={{ padding: '6px 0', borderBottom: '1px dashed var(--line)' }}>
+                              <div style={{ fontSize: 13 }}><strong>{l.action}</strong> — <span style={{ color: 'var(--text-sub)' }}>bởi {l.actor_display_name || l.actorDisplayName || l.actor_user_id || l.actorUserId}</span></div>
+                              <div style={{ fontSize: 12, color: 'var(--text-sub)' }}>{l.ts || l.created_at}{l.note ? ` · ${l.note}` : ''}</div>
+                            </div>
+                          ))}
+                          {!detailDataA?.auditLogs?.length && <div style={{ color: 'var(--text-sub)', fontSize: 13 }}>Không có lịch sử</div>}
+                        </div>
+                        {(detailDataA?.target_slug || detailDataA?.targetSlug) && (
+                          <div style={{ marginTop: 12 }}>
+                            <button type="button" className="admin-btn admin-btn--sm" onClick={() => {
+                              const slug = detailDataA.target_slug || detailDataA.targetSlug;
+                              window.open(`/chi-tiet-truyen/${slug}`, '_blank');
+                            }}>Mở nội dung gốc</button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </>

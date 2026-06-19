@@ -23,7 +23,10 @@ CORS(app)
 
 # ── Cấu hình ──────────────────────────────────────────────────────────────────
 PERSPECTIVE_API_KEY = os.environ.get("PERSPECTIVE_API_KEY", "")
-REUP_THRESHOLD_HIGH  = float(os.environ.get("REUP_THRESHOLD_HIGH",  "0.90"))
+REUP_THRESHOLD_HIGH      = float(os.environ.get("REUP_THRESHOLD_HIGH",      "0.90"))
+REUP_THRESHOLD_MID       = float(os.environ.get("REUP_THRESHOLD_MID",       "0.75"))
+VIOLATION_THRESHOLD_HIGH = float(os.environ.get("VIOLATION_THRESHOLD_HIGH", "0.75"))
+VIOLATION_THRESHOLD_MID  = float(os.environ.get("VIOLATION_THRESHOLD_MID",  "0.45"))
 
 # ── Cấu hình MySQL ────────────────────────────────────────────────────────────
 DB_CONFIG = {
@@ -66,10 +69,6 @@ def init_db():
         logger.info("DB tables ready.")
     except Exception as e:
         logger.warning(f"DB init failed (will use in-memory only): {e}")
-REUP_THRESHOLD_MID   = float(os.environ.get("REUP_THRESHOLD_MID",   "0.75"))
-VIOLATION_THRESHOLD_HIGH = float(os.environ.get("VIOLATION_THRESHOLD_HIGH", "0.75"))
-VIOLATION_THRESHOLD_MID  = float(os.environ.get("VIOLATION_THRESHOLD_MID",  "0.45"))
-
 # ── Load model (lazy, chỉ load 1 lần khi khởi động) ──────────────────────────
 embedding_model = None
 
@@ -145,6 +144,8 @@ def split_paragraphs(text: str, min_words: int = 30) -> list[str]:
 # ── Lớp 1: Phát hiện Reup ─────────────────────────────────────────────────────
 def compute_embedding(text: str) -> np.ndarray:
     model = get_embedding_model()
+    if model is None:
+        raise RuntimeError("Embedding model not available")
     return model.encode(text, normalize_embeddings=True)
 
 def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
@@ -249,7 +250,7 @@ def check_reup():
 # Từ khóa NGHIÊM TRỌNG — chỉ cần xuất hiện 1 lần là vi phạm nặng
 # (không thể xuất hiện trong hư cấu bình thường)
 HARD_KEYWORDS = {
-    # Phản động / chính trị — cụm từ dài, ít khả năng hư cấu
+    # Phản động / chính trị
     "lật đổ chính quyền": 1.0,
     "lat do chinh quyen": 1.0,
     "chống phá nhà nước": 1.0,
@@ -258,41 +259,122 @@ HARD_KEYWORDS = {
     "kich dong bao loan": 1.0,
     "tuyên truyền chống": 0.9,
     "tuyen truyen chong": 0.9,
+    "cướp chính quyền": 1.0,
+    "cuop chinh quyen": 1.0,
+    "lật đổ": 0.9,
+    "lat do": 0.9,
+    "phản quốc": 0.95,
+    "phan quoc": 0.95,
+    "bán nước": 0.95,
+    "ban nuoc": 0.95,
+    "diệt cộng": 1.0,
+    "diet cong": 1.0,
+    "chống cộng": 0.95,
+    "chong cong": 0.95,
+    "thánh chiến": 1.0,
+    "thanh chien": 1.0,
+    "khủng bố nhà nước": 1.0,
+    "khung bo nha nuoc": 1.0,
     # Tổ chức cấm
     "việt tân": 1.0,
     "viet tan": 1.0,
     "fulro": 1.0,
-    # Nội dung đồi trụy rõ ràng
+    "việt nam cộng hòa": 0.9,
+    # Nội dung đồi trụy / xâm hại
     "khiêu dâm": 0.9,
     "khieu dam": 0.9,
     "đồi trụy": 0.9,
     "doi truy": 0.9,
     "porn": 0.9,
+    "hentai": 0.9,
+    "ấu dâm": 1.0,
+    "au dam": 1.0,
+    "xâm hại trẻ em": 1.0,
+    "xam hai tre em": 1.0,
+    "hiếp dâm trẻ em": 1.0,
+    "hiep dam tre em": 1.0,
 }
 
 # Từ khóa MỀM — cần tính theo mật độ, có thể xuất hiện trong hư cấu
 # key: từ khóa, value: điểm mỗi lần xuất hiện
 SOFT_KEYWORDS = {
     # Bạo lực — bình thường trong tiểu thuyết hành động
-    "giết người": 0.08,
-    "giet nguoi":  0.08,
-    "khủng bố":    0.08,
-    "khung bo":    0.08,
-    "đánh bom":    0.08,
-    "danh bom":    0.08,
-    "thảm sát":    0.08,
-    "tham sat":    0.08,
-    # Từ nhạy cảm nhẹ
-    "phản động":   0.1,
-    "phan dong":   0.1,
-    "đảo chính":   0.1,
-    "dao chinh":   0.1,
-    "xuyên tạc":   0.06,
-    "xuyen tac":   0.06,
+    "giết người":     0.08,
+    "giet nguoi":     0.08,
+    "khủng bố":       0.08,
+    "khung bo":       0.08,
+    "đánh bom":       0.08,
+    "danh bom":       0.08,
+    "thảm sát":       0.08,
+    "tham sat":       0.08,
+    "chém giết":      0.08,
+    "chem giet":      0.08,
+    "tra tấn":        0.08,
+    "tra tan":        0.08,
+    "hành hạ":        0.07,
+    "hanh ha":        0.07,
+    "bạo hành":       0.08,
+    "bao hanh":       0.08,
+    "tự tử":          0.08,
+    "tu tu":          0.08,
+    "tự sát":         0.08,
+    "tu sat":         0.08,
+    # Từ chính trị nhạy cảm
+    "phản động":      0.1,
+    "phan dong":      0.1,
+    "đảo chính":      0.1,
+    "dao chinh":      0.1,
+    "xuyên tạc":      0.06,
+    "xuyen tac":      0.06,
+    "kích động":      0.07,
+    "kich dong":      0.07,
     # Nội dung người lớn mức nhẹ
-    "sex":   0.12,
-    "nude":  0.12,
-    "18+":   0.1,
+    "sex":            0.12,
+    "nude":           0.12,
+    "18+":            0.1,
+    "người lớn":      0.07,
+    "nguoi lon":      0.07,
+    "cưỡng bức":      0.1,
+    "cuong buc":      0.1,
+    "hiếp dâm":       0.12,
+    "hiep dam":       0.12,
+    "mại dâm":        0.1,
+    "mai dam":        0.1,
+    "cave":           0.1,
+    "điếm":           0.1,
+    "diem":           0.08,
+    # Ma túy
+    "ma túy":         0.1,
+    "ma tuy":         0.1,
+    "heroin":         0.12,
+    "cần sa":         0.1,
+    "can sa":         0.1,
+    "cocaine":        0.12,
+    "chích choác":    0.1,
+    "chich choac":    0.1,
+    "nghiện ngập":    0.08,
+    "nghien ngap":    0.08,
+    "buôn lậu":       0.08,
+    "buon lau":       0.08,
+    # Xúc phạm / chửi bới
+    "đồ ngu":         0.06,
+    "do ngu":         0.06,
+    "thằng chó":      0.07,
+    "thang cho":      0.07,
+    "con chó":        0.05,
+    "con cho":        0.05,
+    "đồ khốn":        0.07,
+    "do khon":        0.07,
+    "đồ súc vật":     0.08,
+    "do suc vat":     0.08,
+    "mẹ mày":         0.07,
+    "me may":         0.07,
+    "địt mẹ":         0.12,
+    "dit me":         0.12,
+    "đụ má":          0.12,
+    "du ma":          0.12,
+    "vãi lồn":        0.1,
+    "vai lon":        0.1,
 }
 
 # Pattern hư cấu — nếu từ bạo lực đi kèm những mẫu này thì giảm điểm
@@ -540,30 +622,27 @@ REUP_PAGE_RATIO_MID  = float(os.environ.get("REUP_PAGE_RATIO_MID",  "0.15"))
 # RAM cache: { "comicId:chapterId": [ "phash_str", ... ] }
 image_phashes = {}
 
-# Anime NSFW classifier (lazy load)
-anime_nsfw_classifier = None
-real_nsfw_classifier = None
+# NSFW classifier (lazy load) — Falconsai/nsfw_image_detection (ViT fine-tuned)
+nsfw_pipeline = None
 
-def get_anime_nsfw_classifier():
-    """CLIP model dùng zero-shot để detect NSFW."""
-    global anime_nsfw_classifier
-    if anime_nsfw_classifier is None:
-        logger.info("Loading CLIP NSFW classifier (openai/clip-vit-base-patch32)...")
-        from transformers import CLIPProcessor, CLIPModel
-        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-        model.eval()
-        anime_nsfw_classifier = (processor, model)
-        logger.info("CLIP NSFW classifier loaded.")
-    return anime_nsfw_classifier
+NSFW_VIOLATION_THRESHOLD  = float(os.environ.get("NSFW_VIOLATION_THRESHOLD",  "0.75"))
+NSFW_SUSPICIOUS_THRESHOLD = float(os.environ.get("NSFW_SUSPICIOUS_THRESHOLD", "0.50"))
 
-def get_real_nsfw_classifier():
-    return get_anime_nsfw_classifier()  # dùng chung 1 CLIP model
+def get_nsfw_pipeline():
+    global nsfw_pipeline
+    if nsfw_pipeline is None:
+        logger.info("Loading Falconsai/nsfw_image_detection model...")
+        from transformers import pipeline as hf_pipeline
+        nsfw_pipeline = hf_pipeline(
+            "image-classification",
+            model="Falconsai/nsfw_image_detection",
+        )
+        logger.info("NSFW model loaded.")
+    return nsfw_pipeline
 
-def _classify_nsfw_clip(img_input) -> float:
-    """Dùng CLIP zero-shot để tính nsfw_score. Trả về float 0-1."""
-    import torch
-    processor, model = get_anime_nsfw_classifier()
+def _classify_nsfw(img_input) -> float | None:
+    """Chạy NSFW classifier. Trả về nsfw_score float 0-1, hoặc None nếu lỗi."""
+    from PIL import Image as PILImage
     if isinstance(img_input, str):
         pil_img = download_image(img_input)
         if pil_img is None:
@@ -571,24 +650,13 @@ def _classify_nsfw_clip(img_input) -> float:
     else:
         pil_img = img_input
 
-    texts = ["explicit sexual content nudity pornography hentai adult",
-             "safe content manga anime cartoon family friendly normal"]
-
-    # Xử lý text và image riêng biệt để tránh padding error
-    text_inputs = processor.tokenizer(
-        texts, return_tensors="pt", padding=True, truncation=True, max_length=77
-    )
-    image_inputs = processor.image_processor(images=pil_img, return_tensors="pt")
-    inputs = {**text_inputs, **image_inputs}
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-    probs = outputs.logits_per_image.softmax(dim=1)[0]
-    return float(probs[0])  # xác suất là NSFW
-
-# Ngưỡng anime NSFW
-ANIME_NSFW_R18_THRESHOLD = float(os.environ.get("ANIME_NSFW_R18_THRESHOLD", "0.75"))  # r18 → VIOLATION
-ANIME_NSFW_R15_THRESHOLD = float(os.environ.get("ANIME_NSFW_R15_THRESHOLD", "0.80"))  # r15 → SUSPICIOUS
+    pipe = get_nsfw_pipeline()
+    results = pipe(pil_img)
+    # results = [{"label": "normal"|"nsfw", "score": float}, ...]
+    for item in results:
+        if item["label"] == "nsfw":
+            return float(item["score"])
+    return 0.0
 
 def load_phashes_from_db():
     """Load toàn bộ pHash ảnh từ MySQL vào RAM."""
@@ -650,11 +718,22 @@ def phash_distance(h1: str, h2: str) -> int:
     return imagehash.hex_to_hash(h1) - imagehash.hex_to_hash(h2)
 
 def check_anime_nsfw(img_input) -> dict:
-    """NSFW detection tạm thời disabled do model incompatibility trên Windows."""
-    return {"result": "CLEAN", "label": "skipped", "score": 0.0}
+    """Phát hiện NSFW/hentai bằng Falconsai/nsfw_image_detection."""
+    try:
+        score = _classify_nsfw(img_input)
+        if score is None:
+            return {"result": "CLEAN", "label": "download-error", "score": 0.0}
+        if score >= NSFW_VIOLATION_THRESHOLD:
+            return {"result": "VIOLATION", "label": "nsfw", "score": round(score, 4)}
+        if score >= NSFW_SUSPICIOUS_THRESHOLD:
+            return {"result": "SUSPICIOUS", "label": "suggestive", "score": round(score, 4)}
+        return {"result": "CLEAN", "label": "normal", "score": round(score, 4)}
+    except Exception as e:
+        logger.warning(f"check_anime_nsfw error: {e}")
+        return {"result": "CLEAN", "label": "model-error", "score": 0.0}
 
 def check_real_nsfw(img_input) -> dict:
-    return {"result": "CLEAN", "label": "skipped", "score": 0.0}
+    return check_anime_nsfw(img_input)
 
 def check_nsfw_combined(img) -> dict:
     """Chạy cả 2 model, lấy kết quả tệ nhất."""
@@ -931,6 +1010,7 @@ def health():
     return jsonify({
         "status": "ok",
         "perspectiveApiConfigured": bool(PERSPECTIVE_API_KEY),
+        "embeddingModelLoaded": embedding_model is not None,
         "kho_size": len(chapter_embeddings),
         "image_kho_size": len(image_phashes),
     })
@@ -943,7 +1023,18 @@ if __name__ == "__main__":
     load_embeddings_from_db()
     # 3. Load pHash ảnh vào RAM
     load_phashes_from_db()
-    # 4. Load PhoBERT model (text)
-    get_embedding_model()
-    logger.info("All models ready. Starting Flask...")
+    # 4. Load PhoBERT model (text) — bỏ qua nếu torch DLL lỗi trên Windows
+    try:
+        get_embedding_model()
+        logger.info("PhoBERT embedding model loaded.")
+    except Exception as e:
+        logger.warning(f"Could not load embedding model (reup detection disabled): {e}")
+        embedding_model = None
+    # 5. Load NSFW image model
+    try:
+        get_nsfw_pipeline()
+        logger.info("NSFW image model loaded.")
+    except Exception as e:
+        logger.warning(f"Could not load NSFW model (image moderation disabled): {e}")
+    logger.info("Starting Flask (some models may be disabled)...")
     app.run(host="0.0.0.0", port=5000, debug=False)

@@ -2,12 +2,13 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-  faPen, faCalendarDays, faBook, faEye, faBookmark, faLock, faHeart as faHeartSolid, faFlag, faStar,
+  faPen, faCalendarDays, faBook, faEye, faBookmark, faLock, faHeart as faHeartSolid, faFlag, faStar, faGift,
 } from '@fortawesome/free-solid-svg-icons';
 import { faHeart as faHeartRegular } from '@fortawesome/free-regular-svg-icons';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import ReportModal from '../components/ReportModal';
+import DonateModal from '../components/DonateModal';
 import { meApi } from '../services/authApi';
 import {
   getComicRatingSummaryApi, rateComicApi,
@@ -33,6 +34,7 @@ export default function ChiTietTruyenPage() {
   const [relatedComics, setRelatedComics] = useState([]);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportSuccess, setReportSuccess] = useState(false);
+  const [donateOpen, setDonateOpen] = useState(false);
 
   const [discussionComments, setDiscussionComments] = useState([]);
   const [discussionPage, setDiscussionPage] = useState(0);
@@ -321,6 +323,16 @@ export default function ChiTietTruyenPage() {
                         <FontAwesomeIcon icon={faHeartRegular} /> Đăng nhập để theo dõi
                       </Link>
                     )}
+                    {isLoggedIn && comic?.authorName && (
+                      <button
+                        type="button"
+                        className="chitiet-btn chitiet-btn--donate"
+                        onClick={() => setDonateOpen(true)}
+                        title="Tặng xu cho tác giả"
+                      >
+                        <FontAwesomeIcon icon={faGift} /> Tặng Xu
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="chitiet-btn chitiet-btn--report"
@@ -514,6 +526,12 @@ export default function ChiTietTruyenPage() {
           setReportSuccess(true);
           setTimeout(() => setReportSuccess(false), 3000);
         }}
+      />
+      <DonateModal
+        isOpen={donateOpen}
+        authorName={comic?.authorName}
+        comicId={comic?.id}
+        onClose={() => setDonateOpen(false)}
       />
     </div>
   );

@@ -2,6 +2,7 @@ package com.toptruyen.backend.controller;
 
 import com.toptruyen.backend.dto.WalletTransactionRequest;
 import com.toptruyen.backend.service.MoMoService;
+import com.toptruyen.backend.service.NotificationService;
 import com.toptruyen.backend.service.VnPayService;
 import com.toptruyen.backend.service.WalletService;
 import jakarta.annotation.PostConstruct;
@@ -34,15 +35,17 @@ public class WalletController {
     private final JdbcTemplate jdbcTemplate;
     private final VnPayService vnPayService;
     private final MoMoService moMoService;
+    private final NotificationService notificationService;
 
     @Value("${vnpay.frontend-url:http://localhost:5173}")
     private String frontendUrl;
 
-    public WalletController(WalletService walletService, JdbcTemplate jdbcTemplate, VnPayService vnPayService, MoMoService moMoService) {
+    public WalletController(WalletService walletService, JdbcTemplate jdbcTemplate, VnPayService vnPayService, MoMoService moMoService, NotificationService notificationService) {
         this.walletService = walletService;
         this.jdbcTemplate = jdbcTemplate;
         this.vnPayService = vnPayService;
         this.moMoService = moMoService;
+        this.notificationService = notificationService;
     }
 
     @PostConstruct
@@ -83,6 +86,7 @@ public class WalletController {
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
+        jdbcTemplate.execute("ALTER TABLE donations ADD COLUMN IF NOT EXISTS comic_id BIGINT NULL");
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS user_bank_accounts (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -214,6 +218,84 @@ public class WalletController {
             jdbcTemplate.update(
                 "INSERT INTO donations (from_user_id, to_user_id, amount, author_received, platform_fee, message, from_display_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 userId, toUserId, amount, authorReceived, platformFee, note.isBlank() ? null : note, fromDisplayName);
+
+            jdbcTemplate.update(
+                "INSERT INTO wallet_transactions(user_id, amount, type, reason) VALUES(?, ?, 'INCOME', ?)",
+                toUserId, authorReceived, "Thu nhập ủng hộ từ " + fromDisplayName);
+
+            notificationService.createNotification(
+                toUserId, "DONATE",
+                "Bạn nhận được ủng hộ mới",
+                fromDisplayName + " đã ủng hộ " + authorReceived + " xu cho bạn",
+                null, null);
+
+            return ResponseEntity.ok(Map.of(
+                "message", "Ủng hộ thành công! Tác giả nhận được " + authorReceived + " xu",
+                "newBalance", walletService.getBalance(userId),
+                "authorReceived", authorReceived,
+                "platformFee", platformFee
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/donate-comic")
+    public ResponseEntity<?> donateComic(HttpSession session, @RequestBody Map<String, Object> body) {
+        Long userId = getSessionUserId(session);
+        if (userId == null) return ResponseEntity.status(401).body(Map.of("message", "Chưa đăng nhập"));
+
+        Object comicIdObj = body.get("comicId");
+        Object amountObj = body.get("amount");
+        if (comicIdObj == null || amountObj == null)
+            return ResponseEntity.badRequest().body(Map.of("message", "Thiếu thông tin"));
+
+        long comicId;
+        try { comicId = Long.parseLong(comicIdObj.toString()); } catch (NumberFormatException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "ID truyện không hợp lệ"));
+        }
+
+        long amount;
+        try { amount = Long.parseLong(amountObj.toString()); } catch (NumberFormatException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Số xu không hợp lệ"));
+        }
+        if (amount <= 0)
+            return ResponseEntity.badRequest().body(Map.of("message", "Số xu phải lớn hơn 0"));
+
+        String note = body.getOrDefault("message", "").toString();
+
+        var authorIds = jdbcTemplate.queryForList(
+            "SELECT user_id FROM published_comics WHERE id = ? LIMIT 1", Long.class, comicId);
+        if (authorIds.isEmpty())
+            return ResponseEntity.badRequest().body(Map.of("message", "Không tìm thấy truyện"));
+
+        Long authorUserId = authorIds.get(0);
+        if (authorUserId.equals(userId))
+            return ResponseEntity.badRequest().body(Map.of("message", "Không thể ủng hộ truyện của chính mình"));
+
+        try {
+            long[] result = walletService.donateMoney(userId, authorUserId, amount, note.isBlank() ? "Ủng hộ tác giả" : note);
+            long authorReceived = result[0];
+            long platformFee = result[1];
+
+            jdbcTemplate.update(
+                "INSERT INTO wallet_transactions(user_id, amount, type, reason) VALUES(?, ?, 'INCOME', ?)",
+                authorUserId, authorReceived, "Thu nhập donate #" + comicId);
+
+            String fromDisplayName = jdbcTemplate.queryForObject(
+                "SELECT display_name FROM users WHERE id = ? LIMIT 1", String.class, userId);
+            jdbcTemplate.update(
+                "INSERT INTO donations (from_user_id, to_user_id, amount, author_received, platform_fee, message, from_display_name, comic_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                userId, authorUserId, amount, authorReceived, platformFee, note.isBlank() ? null : note, fromDisplayName, comicId);
+
+            var comicInfo = jdbcTemplate.queryForMap("SELECT title, slug FROM published_comics WHERE id = ? LIMIT 1", comicId);
+            String comicTitle = (String) comicInfo.get("title");
+            String comicSlug = (String) comicInfo.get("slug");
+            notificationService.createNotification(
+                authorUserId, "DONATE",
+                "Bạn nhận được ủng hộ mới",
+                fromDisplayName + " đã ủng hộ " + authorReceived + " xu cho truyện \"" + comicTitle + "\"",
+                comicId, "/chi-tiet-truyen/" + comicSlug);
 
             return ResponseEntity.ok(Map.of(
                 "message", "Ủng hộ thành công! Tác giả nhận được " + authorReceived + " xu",

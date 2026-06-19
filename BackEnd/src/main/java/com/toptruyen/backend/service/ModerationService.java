@@ -207,11 +207,15 @@ public class ModerationService {
             sb.append(". ");
         }
         if ("VIOLATION".equals(nudResult)) {
-            sb.append(String.format("⚠️ AI phát hiện nội dung vi phạm (score: %.0f%%). ", nudScore * 100));
+            sb.append(String.format(
+                "⚠️ Ảnh chứa nội dung đồi trụy / khiêu dâm bị cấm (độ chắc chắn: %.0f%%). " +
+                "Vui lòng xóa các ảnh vi phạm và đăng lại. ", nudScore * 100));
         } else if ("PENDING".equals(nudResult) || "model-error".equals(nudLabel)) {
-            sb.append("🔧 Model AI chưa sẵn sàng khi đăng — chưa kiểm tra được nội dung hình ảnh, cần admin xét thủ công. ");
+            sb.append("🔧 Hệ thống AI tạm thời không kiểm tra được ảnh — chương sẽ được admin xét duyệt thủ công. ");
         } else if ("SUSPICIOUS".equals(nudResult)) {
-            sb.append(String.format("⚠️ AI nghi ngờ nội dung hình ảnh (score: %.0f%%) — cần xem xét. ", nudScore * 100));
+            sb.append(String.format(
+                "⚠️ Ảnh có dấu hiệu nội dung nhạy cảm (%.0f%%) — chương cần được admin xét duyệt trước khi hiển thị. ",
+                nudScore * 100));
         }
         return sb.isEmpty() ? null : sb.toString().trim();
     }
@@ -254,9 +258,13 @@ public class ModerationService {
             sb.append(". ");
         }
         if ("VIOLATION".equals(violResult)) {
-            sb.append(String.format("Phát hiện nội dung vi phạm (điểm: %.0f%%). ", violScore * 100));
+            sb.append(String.format(
+                "Nội dung chứa ngôn ngữ / từ ngữ vi phạm quy định cộng đồng (độ chắc chắn: %.0f%%). " +
+                "Vui lòng chỉnh sửa nội dung và đăng lại. ", violScore * 100));
         } else if ("SUSPICIOUS".equals(violResult)) {
-            sb.append(String.format("Nghi ngờ nội dung vi phạm quy định (%.0f%%). ", violScore * 100));
+            sb.append(String.format(
+                "Nội dung có từ ngữ nhạy cảm (%.0f%%) — chương cần được admin xét duyệt trước khi hiển thị. ",
+                violScore * 100));
         }
         return sb.isEmpty() ? null : sb.toString().trim();
     }

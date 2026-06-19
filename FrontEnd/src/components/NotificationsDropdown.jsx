@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBell, faBook, faCommentDots, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
@@ -9,6 +9,7 @@ const TYPE_ICONS = {
   NEW_COMIC: faStar,
   NEW_CHAPTER: faBook,
   FOLLOW_COMIC: faHeart,
+  DONATE: faHeart,
   COMMENT_REPLY: faCommentDots,
   COMMENT_ON_CHAPTER: faCommentDots,
   REPORT: faExclamationTriangle,
@@ -23,12 +24,24 @@ export default function NotificationsDropdown() {
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const navigate = useNavigate();
+  const menuRef = useRef(null);
 
   useEffect(() => {
     getUnreadCountApi()
       .then((data) => setUnreadCount(data?.unreadCount ?? data ?? 0))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
@@ -82,7 +95,7 @@ export default function NotificationsDropdown() {
   };
 
   return (
-    <div className="notifications-menu">
+    <div className="notifications-menu" ref={menuRef}>
       <button
         className="notifications-trigger"
         onClick={() => setIsOpen(!isOpen)}

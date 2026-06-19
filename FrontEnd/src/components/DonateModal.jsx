@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faHeart } from '@fortawesome/free-solid-svg-icons';
-import { getWalletBalanceApi, transferWalletApi } from '../services/walletApi';
+import { getWalletBalanceApi, donateComicApi, transferWalletApi } from '../services/walletApi';
 
 const PRESETS = [50, 100, 200, 500];
 
-export default function DonateModal({ authorName, isOpen, onClose }) {
+export default function DonateModal({ authorName, comicId, isOpen, onClose }) {
   const [balance, setBalance] = useState(null);
   const [selected, setSelected] = useState(null);
   const [custom, setCustom] = useState('');
@@ -40,7 +40,9 @@ export default function DonateModal({ authorName, isOpen, onClose }) {
     setMessage('');
     setIsError(false);
     try {
-      const result = await transferWalletApi(authorName, amount, note || `Ủng hộ tác giả ${authorName}`);
+      const result = comicId
+        ? await donateComicApi(comicId, amount, note || `Ủng hộ tác giả ${authorName}`)
+        : await transferWalletApi(authorName, amount, note || `Ủng hộ tác giả ${authorName}`);
       const authorReceived = result?.authorReceived ?? Math.floor(amount * 0.6);
       setMessage(`Đã ủng hộ ${amount.toLocaleString()} xu! Tác giả nhận được ${Number(authorReceived).toLocaleString()} xu.`);
       setIsError(false);

@@ -441,7 +441,7 @@ public class AdminService {
             if (rows.isEmpty()) throw new IllegalArgumentException("Report not found");
             java.util.Map<String, Object> detail = new java.util.HashMap<>(rows.get(0));
             List<java.util.Map<String, Object>> logs = jdbcTemplate.queryForList(
-                "SELECT action, actor_user_id, note, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS ts FROM report_audit_logs WHERE report_scope = 'COMMENT' AND report_id = ? ORDER BY created_at DESC",
+                "SELECT ral.action, ral.actor_user_id, COALESCE(u.display_name, CONCAT('User #', ral.actor_user_id)) AS actor_display_name, ral.note, DATE_FORMAT(ral.created_at, '%Y-%m-%d %H:%i') AS ts FROM report_audit_logs ral LEFT JOIN users u ON u.id = ral.actor_user_id WHERE ral.report_scope = 'COMMENT' AND ral.report_id = ? ORDER BY ral.created_at DESC",
                 reportId
             );
             detail.put("auditLogs", logs);
@@ -454,7 +454,7 @@ public class AdminService {
             if (rows.isEmpty()) throw new IllegalArgumentException("Report not found");
             java.util.Map<String, Object> detail = new java.util.HashMap<>(rows.get(0));
             List<java.util.Map<String, Object>> logs = jdbcTemplate.queryForList(
-                "SELECT action, actor_user_id, note, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS ts FROM report_audit_logs WHERE report_scope = 'CONTENT' AND report_id = ? ORDER BY created_at DESC",
+                "SELECT ral.action, ral.actor_user_id, COALESCE(u.display_name, CONCAT('User #', ral.actor_user_id)) AS actor_display_name, ral.note, DATE_FORMAT(ral.created_at, '%Y-%m-%d %H:%i') AS ts FROM report_audit_logs ral LEFT JOIN users u ON u.id = ral.actor_user_id WHERE ral.report_scope = 'CONTENT' AND ral.report_id = ? ORDER BY ral.created_at DESC",
                 reportId
             );
             detail.put("auditLogs", logs);
@@ -824,6 +824,10 @@ public class AdminService {
                 UPDATE published_chapters SET status = 'PUBLISHED', moderation_reason = NULL
                 WHERE id = ? AND status = 'PENDING_REVIEW'
                 """, chapterId);
+        jdbcTemplate.update("""
+                UPDATE published_comics SET published_at = CURRENT_TIMESTAMP
+                WHERE id = (SELECT comic_id FROM published_chapters WHERE id = ?)
+                """, chapterId);
         // Gửi thông báo cho tác giả
         try {
             java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList("""
@@ -864,7 +868,7 @@ public class AdminService {
                         chapterId, "/sang-tac?view=manage");
             }
         } catch (Exception ignored) {}
-        jdbcTemplate.update("DELETE FROM published_chapters WHERE id = ? AND status = 'PENDING_REVIEW'", chapterId);
+        jdbcTemplate.update("UPDATE published_chapters SET status = 'REJECTED', moderation_reason = ? WHERE id = ? AND status = 'PENDING_REVIEW'", reason, chapterId);
     }
 
     /**
@@ -962,6 +966,7 @@ public class AdminService {
                 switch (result.decision()) {
                     case APPROVED -> {
                         jdbcTemplate.update("UPDATE published_chapters SET status='PUBLISHED', moderation_reason=NULL WHERE id=?", chapterId);
+                        jdbcTemplate.update("UPDATE published_comics SET published_at=CURRENT_TIMESTAMP WHERE id=?", comicId);
                         // Index vào kho AI
                         if ("text".equals(mode)) {
                             final String fc = content; final Long fch = chapterId; final Long fco = comicId;

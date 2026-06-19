@@ -189,6 +189,38 @@ public class AuthController {
         return ResponseEntity.ok(profile);
     }
 
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@RequestBody Map<String, String> body) {
+        String email = body != null ? body.get("email") : null;
+        if (email == null || email.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Email không được để trống"));
+        }
+        try {
+            authService.requestPasswordReset(email.trim());
+            return ResponseEntity.ok(Map.of("message", "Đã gửi email hướng dẫn đặt lại mật khẩu. Vui lòng kiểm tra hộp thư (kể cả thư rác)."));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("message", "Gửi email thất bại: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> body) {
+        String token = body != null ? body.get("token") : null;
+        String newPassword = body != null ? body.get("newPassword") : null;
+        if (token == null || token.isBlank() || newPassword == null || newPassword.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Thông tin không hợp lệ"));
+        }
+        if (newPassword.length() < 6) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Mật khẩu phải có ít nhất 6 ký tự"));
+        }
+        try {
+            authService.resetPassword(token, newPassword);
+            return ResponseEntity.ok(Map.of("message", "Đặt lại mật khẩu thành công! Vui lòng đăng nhập lại."));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
     @PostMapping("/change-password")
     public ResponseEntity<?> changePassword(@RequestBody Map<String, String> body, HttpSession session) {
         Object userId = session.getAttribute(SESSION_USER_ID);

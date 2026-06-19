@@ -15,6 +15,8 @@ import AppealPage from './pages/AppealPage';
 import LichSuPage from './pages/LichSuPage';
 import TuTruyenPage from './pages/TuTruyenPage';
 import XepHangPage from './pages/XepHangPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
 
@@ -24,6 +26,8 @@ export default function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/tim-truyen" element={<TimTruyenPage />} />
       <Route path="/doc-truyen/:slug" element={<ComicReaderPage />} />
       <Route path="/doc-truyen/:slug/:chapterId" element={<ComicReaderPage />} />

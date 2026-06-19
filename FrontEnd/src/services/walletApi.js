@@ -101,6 +101,16 @@ export async function requestWithdrawalApi(amount, bankInfo, note = '') {
   return parseResponse(response);
 }
 
+export async function donateComicApi(comicId, amount, message = '') {
+  const response = await fetch(`${API_BASE}/api/wallet/donate-comic`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ comicId, amount, message }),
+  });
+  return parseResponse(response);
+}
+
 export async function getDonationsReceivedApi(page = 0, limit = 20) {
   const response = await fetch(`${API_BASE}/api/wallet/donations/received?page=${page}&limit=${limit}`, {
     credentials: 'include',
