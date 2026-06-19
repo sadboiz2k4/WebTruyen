@@ -186,6 +186,6 @@ Tác giả đăng chapter
 
 ## Nhóm phát triển
 
-Dự án được phát triển bởi nhóm sinh viên — đồ án môn học.
+Dự án được phát triển bởi sinh viên — đồ án môn học.
 
 > Lưu ý: Đây là dự án học thuật, không sử dụng cho mục đích thương mại.
