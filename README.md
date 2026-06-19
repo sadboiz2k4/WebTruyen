@@ -154,24 +154,77 @@ WebTruyen/
 
 ## Luồng kiểm duyệt AI
 
+Hệ thống kiểm duyệt hoạt động tự động ngay khi tác giả bấm đăng chapter, chia làm **2 nhánh song song** tùy loại nội dung:
+
+### Truyện chữ
+
 ```
-Tác giả đăng chapter
-        │
-        ▼
-┌───────────────────┐
-│  Lớp 1: Reup      │  PhoBERT embedding → cosine similarity > 90%?
-│  (Đạo văn)        │──── YES ──► REJECTED (trùng nội dung)
-└───────────────────┘
-        │ NO
-        ▼
-┌───────────────────┐
-│  Lớp 2: Vi phạm   │  PhoBERT fine-tuned / Perspective API > 75%?
-│  (Nội dung xấu)   │──── YES ──► REJECTED (nội dung vi phạm)
-└───────────────────┘
-        │ NO / AI offline
-        ▼
-   PUBLISHED / PENDING_REVIEW (xét duyệt thủ công bởi Admin)
+Tác giả đăng chapter chữ
+           │
+           ▼
+┌─────────────────────────────────────────────────────────┐
+│  Lớp 1: Phát hiện Đạo văn / Reup nội dung              │
+│                                                         │
+│  • Vector hóa nội dung bằng PhoBERT Sentence Embedding  │
+│  • So sánh cosine similarity với toàn bộ chapter        │
+│    đã có trong hệ thống (lưu trong MySQL)               │
+│  • Similarity ≥ 90%  →  REJECTED (đạo văn rõ ràng)     │
+│  • Similarity 75–90% →  PENDING_REVIEW (nghi vấn)       │
+└────────────────────────┬────────────────────────────────┘
+                         │ Không trùng
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Lớp 2: Phát hiện Vi phạm ngôn ngữ                     │
+│                                                         │
+│  • Mô hình PhoBERT fine-tuned tiếng Việt                │
+│    phân loại nội dung độc hại, thù địch, tục tĩu...     │
+│  • Nếu mô hình cục bộ không khả dụng → fallback sang   │
+│    Google Perspective API                               │
+│  • Score ≥ 75%  →  REJECTED (vi phạm nội dung)         │
+│  • Score 45–75% →  PENDING_REVIEW (cần xét thủ công)   │
+└────────────────────────┬────────────────────────────────┘
+                         │ Sạch
+                         ▼
+                     PUBLISHED ✓
 ```
+
+### Truyện tranh (ảnh)
+
+```
+Tác giả đăng chapter ảnh
+           │
+           ▼
+┌─────────────────────────────────────────────────────────┐
+│  Lớp 1: Phát hiện Reup ảnh (pHash)                     │
+│                                                         │
+│  • Tính perceptual hash (pHash) cho từng trang ảnh      │
+│  • So sánh Hamming distance với toàn bộ ảnh trong DB    │
+│  • Độ tương đồng cao → REJECTED (reup truyện tranh)     │
+└────────────────────────┬────────────────────────────────┘
+                         │ Không trùng
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Lớp 2: Phát hiện ảnh đồi trụy / nội dung 18+ (NudeNet)│
+│                                                         │
+│  • Dùng mô hình NudeNet phân tích từng trang ảnh        │
+│  • Phát hiện nội dung khỏa thân, tình dục, bạo lực...  │
+│  • Confidence ≥ ngưỡng → REJECTED (ảnh vi phạm)         │
+└────────────────────────┬────────────────────────────────┘
+                         │ Sạch
+                         ▼
+                     PUBLISHED ✓
+```
+
+### Khi AI offline
+
+```
+AI Service không phản hồi
+           │
+           ▼
+    PENDING_REVIEW — Admin xét duyệt thủ công
+```
+
+> **Tóm tắt các trường hợp bị từ chối**: đạo văn truyện chữ · reup truyện tranh · nội dung độc hại / thù địch · ảnh đồi trụy / 18+
 
 ---
 
@@ -186,6 +239,6 @@ Tác giả đăng chapter
 
 ## Nhóm phát triển
 
-Dự án được phát triển bởi sinh viên — đồ án môn học.
+Dự án được phát triển bởi sinh viên đại học Nông Lâm TPHCM — đồ án môn học.
 
 > Lưu ý: Đây là dự án học thuật, không sử dụng cho mục đích thương mại.
